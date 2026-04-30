@@ -1,0 +1,20 @@
+{
+  "name": "werewolf-online",
+  "version": "2.0.0",
+  "description": "狼人杀联机版",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "prepare:e2e": "npx playwright install --with-deps",
+    "test:e2e": "npx playwright test"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "playwright": "^1.59.1"
+  }
+}
