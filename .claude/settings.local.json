@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(open *)"
+      "Bash(open *)",
+      "Bash(node -c server.js)",
+      "Bash(node *)"
     ]
   }
 }

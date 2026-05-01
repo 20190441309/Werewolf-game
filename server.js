@@ -50,6 +50,28 @@ function getRoleConfig(count) {
   return { werewolf: 4, villager: 3, seer: 1, witch: 1, hunter: 1, guard: 1, extra1: count - 11 };
 }
 
+function validateRoleConfig(config, playerCount) {
+  if (!config || typeof config !== 'object') return { valid: false, error: '配置格式无效' };
+
+  let total = 0;
+  let wolfCount = 0;
+  let villagerTeamCount = 0;
+
+  for (const [role, num] of Object.entries(config)) {
+    if (!ROLES[role]) return { valid: false, error: `未知角色: ${role}` };
+    if (typeof num !== 'number' || num < 0 || !Number.isInteger(num)) return { valid: false, error: `${ROLES[role].name} 数量无效` };
+    total += num;
+    if (role === 'werewolf') wolfCount += num;
+    else villagerTeamCount += num;
+  }
+
+  if (wolfCount < 1) return { valid: false, error: '至少需要1名狼人' };
+  if (villagerTeamCount < 1) return { valid: false, error: '至少需要1名好人阵营角色' };
+  if (total !== playerCount) return { valid: false, error: `角色总数(${total})与玩家数(${playerCount})不匹配` };
+
+  return { valid: true };
+}
+
 function shuffle(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -87,6 +109,12 @@ class Room {
     this._voteTally = null;
     this._pendingElimination = null;
 
+    // 旁白
+    this.narrationEnabled = true;
+
+    // 角色配置
+    this.roleConfig = null; // null = 使用默认配置
+
     // 计时器
     this.voteTimer = null;
     this.phaseTimer = null;
@@ -96,6 +124,7 @@ class Room {
     const gender = Math.random() > 0.5 ? 'male' : 'female';
     this.players.push({ socketId, name, role: null, alive: true, gender, revealed: false, disconnected: false });
     this.broadcastState();
+    this.broadcastPersonal();
   }
 
   removePlayer(socketId) {
@@ -192,6 +221,11 @@ class Room {
     if (this.logs.length > 100) this.logs.shift();
   }
 
+  narrate(msg) {
+    if (!this.narrationEnabled) return;
+    io.to(this.roomId).emit('narration', { msg, time: Date.now() });
+  }
+
   broadcastState() {
     const room = this;
     io.to(this.roomId).emit('state', room.getClientState());
@@ -237,6 +271,8 @@ class Room {
         werewolves: this.getAliveWerewolves().length,
         villagers: this.getVillagerTeam().length,
       },
+      narrationEnabled: this.narrationEnabled,
+      roleConfig: this.roleConfig,
     };
   }
 
@@ -289,7 +325,7 @@ class Room {
     const count = this.players.length;
     if (count < MIN_PLAYERS) return false;
 
-    const config = getRoleConfig(count);
+    const config = this.roleConfig || getRoleConfig(count);
     let roleList = [];
     for (const [role, num] of Object.entries(config)) {
       const roleKey = role === 'extra1' ? 'villager' : role;
@@ -310,6 +346,7 @@ class Room {
     this.resetNightState();
     this.phase = 'role-reveal';
     this.log('角色已分配，请大家查看身份！', 'system');
+    this.narrate(`游戏开始！共 ${count} 名玩家，角色已分配，请查看身份。`);
     this.broadcastState();
     this.broadcastPersonal();
     return true;
@@ -336,6 +373,7 @@ class Room {
     if (this.players.every(p => p.revealed || p.disconnected)) {
       this.phase = 'night-werewolf';
       this.log('🌑 夜晚降临，狼人请行动', 'system');
+      this.narrate('所有玩家已确认身份。夜幕降临，狼人开始行动...');
     }
     this.broadcastState();
     this.broadcastPersonal();
@@ -359,7 +397,9 @@ class Room {
       const allSame = targets.every(t => t === targets[0]);
       if (allSame) {
         this.nightKill = targets[0];
-        this.log(`狼人一致决定猎杀 ${this.players.find(pl => pl.socketId === this.nightKill)?.name}`, 'kill');
+        const killName = this.players.find(pl => pl.socketId === this.nightKill)?.name;
+        this.log(`狼人一致决定猎杀 ${killName}`, 'kill');
+        this.narrate(`狼人已达成一致，选定了今夜的猎物。`);
         this.phase = 'night-seer';
         this.broadcastState();
         this.broadcastPersonal();
@@ -375,6 +415,7 @@ class Room {
     if (!target || target.role === 'werewolf') return;
     this.nightKill = targetId;
     this.log(`狼人决定猎杀 ${target.name}`, 'kill');
+    this.narrate(`狼人选定了今夜的猎杀目标。预言家，请睁眼...`);
     this.phase = 'night-seer';
     this.broadcastState();
     this.broadcastPersonal();
@@ -402,6 +443,7 @@ class Room {
     const isWolf = target.role === 'werewolf';
     this.seerResult = { targetId, result: isWolf ? 'werewolf' : 'good' };
     this.log(`预言家查验了 ${target.name}`, 'check');
+    this.narrate('预言家完成查验，洞察了一人的身份。女巫，请睁眼...');
     this.broadcastState();
     this.broadcastPersonal();
 
@@ -431,6 +473,7 @@ class Room {
       }
     }
     this.log(`女巫使用了技能`, 'info');
+    this.narrate('女巫做出抉择，守卫请睁眼...');
     this.phase = 'night-guard';
     this.broadcastState();
     this.broadcastPersonal();
@@ -447,6 +490,9 @@ class Room {
       if (!target) return;
       this.guardTarget = targetId;
       this.log(`守卫守护了 ${target.name}`, 'save');
+      this.narrate('守卫完成守护，所有人闭眼。天即将亮...');
+    } else {
+      this.narrate('守卫选择不守护任何人。天即将亮...');
     }
     this.endNightPhase();
   }
@@ -483,6 +529,14 @@ class Room {
       }
     } else {
       this.log('今夜是平安夜 🌙', 'save');
+    }
+
+    // 旁白：夜晚结算摘要
+    if (this.eliminatedTonight.length > 0) {
+      const names = this.eliminatedTonight.map(e => this.players.find(p => p.socketId === e.id)?.name).filter(Boolean);
+      this.narrate(`天亮了。昨夜 ${names.join('、')} 不幸遇害，村庄陷入悲痛。`);
+    } else {
+      this.narrate('天亮了。昨夜平安无事，无人死亡。');
     }
 
     if (poisonTarget) {
@@ -537,9 +591,11 @@ class Room {
       if (target && target.alive) {
         this.killPlayer(targetId, 'hunter');
         this.log(`猎人开枪带走了 ${target.name}`, 'kill');
+        this.narrate(`猎人临死前开枪，带走了 ${target.name}！`);
       }
     } else {
       this.log('猎人选择不开枪', 'info');
+      this.narrate('猎人选择不开枪，安静地离去。');
     }
     this.hunterPending = null;
 
@@ -567,6 +623,7 @@ class Room {
     this.votes = {};
     const alive = this.getAlivePlayers();
     this.voteTimeLeft = VOTE_TIME_MS;
+    this.narrate(`投票开始！${alive.length} 名存活玩家，请在60秒内投出你的一票。`);
     this.broadcastState();
     this.broadcastPersonal();
 
@@ -624,8 +681,10 @@ class Room {
       eliminatedId = topCandidates[0];
       const ep = this.players.find(pl => pl.socketId === eliminatedId);
       this.log(`${ep.name} 被投票放逐 (${maxVotes}票)`, 'vote');
+      this.narrate(`投票结束！${ep.name} 以 ${maxVotes} 票被放逐。`);
     } else {
       this.log(topCandidates.length > 1 ? '平票！无人被放逐' : '无人投票，无人被放逐', 'vote');
+      this.narrate(topCandidates.length > 1 ? '投票结束！出现平票，本轮无人被放逐。' : '投票结束！无人投票，本轮无人被放逐。');
     }
 
     this._pendingElimination = eliminatedId;
@@ -640,8 +699,10 @@ class Room {
     this._voteTally = null;
 
     if (eliminatedId) {
+      const ep = this.players.find(p => p.socketId === eliminatedId);
       const result = this.killPlayer(eliminatedId, 'vote');
       if (result === 'hunter_dying') {
+        this.narrate(`${ep?.name} 被放逐，作为猎人发动了技能！`);
         this.phase = 'hunter-shoot';
         this.broadcastState();
         this.broadcastPersonal();
@@ -658,6 +719,7 @@ class Room {
     this.resetNightState();
     this.phase = 'night-werewolf';
     this.log(`🌑 第 ${this.round} 夜降临，狼人请行动`, 'system');
+    this.narrate(`第 ${this.round} 夜降临，夜幕再次笼罩村庄。狼人请睁眼...`);
     this.broadcastState();
     this.broadcastPersonal();
   }
@@ -669,6 +731,7 @@ class Room {
       this.winner = 'villager';
       this.phase = 'gameover';
       this.log('🏆 好人阵营获胜！所有狼人已被消灭', 'system');
+      this.narrate('游戏结束！所有狼人已被消灭，好人阵营获胜！村庄恢复和平。');
       this.broadcastState();
       this.broadcastPersonal();
       return true;
@@ -677,6 +740,7 @@ class Room {
       this.winner = 'werewolf';
       this.phase = 'gameover';
       this.log('🐺 狼人阵营获胜！黑暗降临', 'system');
+      this.narrate('游戏结束！狼人数量已超过好人，狼人阵营获胜！黑暗笼罩村庄。');
       this.broadcastState();
       this.broadcastPersonal();
       return true;
@@ -790,6 +854,35 @@ io.on('connection', (socket) => {
   socket.on('restart-game', () => {
     const room = findRoomBySocket(socket.id);
     if (room && room.hostSocketId === socket.id) room.restart();
+  });
+
+  socket.on('toggle-narration', () => {
+    const room = findRoomBySocket(socket.id);
+    if (room && room.hostSocketId === socket.id) {
+      room.narrationEnabled = !room.narrationEnabled;
+      room.broadcastState();
+    }
+  });
+
+  socket.on('set-role-config', (config, callback) => {
+    const room = findRoomBySocket(socket.id);
+    if (!room || room.hostSocketId !== socket.id) return callback?.({ success: false, error: '只有房主可以设置' });
+    if (room.phase !== 'lobby') return callback?.({ success: false, error: '游戏已开始，无法修改' });
+
+    const validation = validateRoleConfig(config, room.players.length);
+    if (!validation.valid) return callback?.({ success: false, error: validation.error });
+
+    room.roleConfig = config;
+    room.broadcastState();
+    callback?.({ success: true });
+  });
+
+  socket.on('reset-role-config', () => {
+    const room = findRoomBySocket(socket.id);
+    if (room && room.hostSocketId === socket.id && room.phase === 'lobby') {
+      room.roleConfig = null;
+      room.broadcastState();
+    }
   });
 
   socket.on('disconnect', () => {
