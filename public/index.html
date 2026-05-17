@@ -522,6 +522,24 @@
     .emotion-grid { grid-template-columns: repeat(4, 1fr); gap: 6px; }
     .emotion-btn { font-size: 20px; padding: 6px; }
   }
+
+  /* 弹窗样式 */
+  .overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000; animation: fadeIn 0.2s ease;
+  }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  .modal {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 28px;
+    box-shadow: 0 16px 64px rgba(0,0,0,0.5);
+    animation: modalSlide 0.3s ease;
+    width: 90%; max-width: 480px;
+  }
+  @keyframes modalSlide { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .modal h2 { font-family: 'Ma Shan Zheng', 'STKaiti', cursive; font-size: 28px; margin-bottom: 16px; }
 </style>
 </head>
 <body>
@@ -722,6 +740,13 @@ const ROLES = {
   cupid:    { name: '丘比特', icon: '💘', color: '#e91e63', desc: '首夜可连接两名玩家为情侣，情侣同生共死', team: 'villager' },
 };
 
+/* ========== Socket ========== */
+const socket = io();
+let state = null;
+let personal = null;
+let myName = localStorage.getItem('ww_name') || '';
+let wwChatHistory = [];
+
 /* ========== 表情/互动系统 ========== */
 const EMOTIONS = [
   { id: 'clap', icon: '👏', name: '鼓掌', anim: 'bounce' },
@@ -865,13 +890,6 @@ function toggleEmotionPanel() {
   if (grid) grid.style.display = isVisible ? 'none' : 'grid';
   if (quickGrid) quickGrid.style.display = isVisible ? 'none' : 'grid';
 }
-
-/* ========== Socket ========== */
-const socket = io();
-let state = null;
-let personal = null;
-let myName = localStorage.getItem('ww_name') || '';
-let wwChatHistory = [];
 
 /* ========== 邀请链接系统 ========== */
 function generateInviteLink(roomId, password = null) {

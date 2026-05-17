@@ -3,7 +3,12 @@
     "allow": [
       "Bash(open *)",
       "Bash(node -c server.js)",
-      "Bash(node *)"
+      "Bash(node *)",
+      "Bash(npm start *)",
+      "Bash(curl -s http://localhost:3000)",
+      "Bash(PORT=3001 node server.js)",
+      "Bash(curl -s http://localhost:3001)",
+      "mcp__plugin_playwright_playwright__browser_navigate"
     ]
   }
 }
