@@ -308,6 +308,7 @@
   .badge-host { background: var(--gold); color: #1a1a00; }
   .badge-me { background: var(--purple); color: #fff; }
   .badge-dead { background: var(--red); color: #fff; }
+  .badge-sheriff { background: linear-gradient(135deg, #ffd700, #ff8c00); color: #1a1a00; font-weight: bold; }
 
   /* 旁白面板 */
   .narration-panel {
@@ -418,6 +419,109 @@
   }
   .config-status.error { background: rgba(224,64,64,0.1); color: var(--red-glow); border: 1px solid rgba(224,64,64,0.2); }
   .config-status.ok { background: rgba(60,184,120,0.1); color: var(--green-glow); border: 1px solid rgba(60,184,120,0.2); }
+
+  /* 表情/互动系统 */
+  .emotion-panel {
+    position: fixed; bottom: 20px; left: 20px;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow);
+    z-index: 50; padding: 12px;
+    max-width: 280px;
+  }
+  .emotion-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .emotion-toggle-btn {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--text-dim); border-radius: 16px; padding: 6px 14px;
+    font-size: 13px; cursor: pointer; transition: all 0.2s;
+    font-family: inherit;
+  }
+  .emotion-toggle-btn:hover { border-color: var(--purple-glow); color: var(--text-bright); }
+  .emotion-mute-btn {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--text-dim); border-radius: 50%; width: 32px; height: 32px;
+    font-size: 14px; cursor: pointer; transition: all 0.2s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .emotion-mute-btn:hover { border-color: var(--text-dim); color: var(--text-bright); }
+  .emotion-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 8px; margin-bottom: 8px;
+  }
+  .emotion-btn {
+    background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 8px;
+    font-size: 24px; cursor: pointer; transition: all 0.2s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .emotion-btn:hover {
+    background: rgba(108,60,224,0.15); border-color: var(--purple-glow);
+    transform: scale(1.1);
+  }
+  .quick-msg-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+  .quick-msg-btn {
+    background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 6px 10px;
+    font-size: 12px; color: var(--text-dim); cursor: pointer;
+    transition: all 0.2s; font-family: inherit;
+  }
+  .quick-msg-btn:hover {
+    background: rgba(108,60,224,0.15); border-color: var(--purple-glow);
+    color: var(--text-bright);
+  }
+  .emotion-float {
+    position: absolute; pointer-events: none; z-index: 100;
+  }
+  .emotion-bounce { animation: emotionBounce 1.5s ease-out forwards; }
+  .emotion-shake { animation: emotionShake 1.5s ease-out forwards; }
+  .emotion-pulse { animation: emotionPulse 1.5s ease-out forwards; }
+  .emotion-float { animation: emotionFloat 1.5s ease-out forwards; }
+  .emotion-spin { animation: emotionSpin 1.5s ease-out forwards; }
+
+  @keyframes emotionPop {
+    0% { transform: scale(0) translateY(0); opacity: 0; }
+    20% { transform: scale(1.3) translateY(-10px); opacity: 1; }
+    40% { transform: scale(1) translateY(-20px); opacity: 1; }
+    100% { transform: scale(0.8) translateY(-60px); opacity: 0; }
+  }
+  @keyframes emotionBounce {
+    0%,100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+  }
+  @keyframes emotionShake {
+    0%,100% { transform: translateX(0); }
+    25% { transform: translateX(-4px); }
+    75% { transform: translateX(4px); }
+  }
+  @keyframes emotionPulse {
+    0%,100% { transform: scale(1); }
+    50% { transform: scale(1.2); }
+  }
+  @keyframes emotionFloat {
+    0% { transform: translateY(0); opacity: 1; }
+    100% { transform: translateY(-20px); opacity: 0; }
+  }
+  @keyframes emotionSpin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  .quick-msg-bubble {
+    padding: 6px 12px; margin: 4px 0;
+    background: rgba(108,60,224,0.1);
+    border-radius: 12px; font-size: 13px;
+    animation: logSlide 0.3s ease-out;
+  }
+
+  @media (max-width: 600px) {
+    .emotion-panel { left: 16px; bottom: 16px; max-width: 240px; }
+    .emotion-grid { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+    .emotion-btn { font-size: 20px; padding: 6px; }
+  }
 </style>
 </head>
 <body>
@@ -458,22 +562,151 @@ function drawStars() {
 }
 initStars(); drawStars();
 
-/* ========== 音效 ========== */
+/* ========== 音效系统 ========== */
 let audioCtx = null;
 function getAudioCtx() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   return audioCtx;
 }
-function playTone(freq, duration, type = 'sine', vol = 0.06) {
-  try {
-    const ac = getAudioCtx();
-    const osc = ac.createOscillator(); const gain = ac.createGain();
-    osc.type = type; osc.frequency.value = freq;
-    gain.gain.setValueAtTime(vol, ac.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + duration);
-    osc.connect(gain); gain.connect(ac.destination);
-    osc.start(); osc.stop(ac.currentTime + duration);
-  } catch(e) {}
+
+const SoundManager = {
+  muted: false,
+  volume: 0.5,
+
+  playTone(freq, duration, type = 'sine', vol = 0.06) {
+    if (this.muted) return;
+    try {
+      const ac = getAudioCtx();
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.type = type;
+      osc.frequency.value = freq;
+      const v = vol * this.volume;
+      gain.gain.setValueAtTime(v, ac.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(ac.destination);
+      osc.start();
+      osc.stop(ac.currentTime + duration);
+    } catch(e) {}
+  },
+
+  playSequence(notes) {
+    if (this.muted) return;
+    let delay = 0;
+    notes.forEach(([freq, dur, type, vol]) => {
+      setTimeout(() => this.playTone(freq, dur, type, vol), delay);
+      delay += dur * 1000 * 0.8;
+    });
+  },
+
+  // 场景音效
+  nightFall() {
+    this.playSequence([
+      [220, 0.4, 'sine', 0.08],
+      [196, 0.3, 'sine', 0.06],
+      [165, 0.6, 'sine', 0.1],
+    ]);
+  },
+
+  dayBreak() {
+    this.playSequence([
+      [392, 0.2, 'triangle', 0.06],
+      [440, 0.2, 'triangle', 0.07],
+      [523, 0.3, 'triangle', 0.08],
+      [659, 0.4, 'sine', 0.1],
+    ]);
+  },
+
+  voteStart() {
+    this.playSequence([
+      [523, 0.15, 'sine', 0.08],
+      [659, 0.15, 'sine', 0.08],
+      [784, 0.3, 'triangle', 0.1],
+    ]);
+  },
+
+  voteEnd() {
+    this.playSequence([
+      [440, 0.2, 'square', 0.06],
+      [349, 0.2, 'square', 0.06],
+      [294, 0.4, 'triangle', 0.08],
+    ]);
+  },
+
+  playerDeath() {
+    this.playSequence([
+      [330, 0.15, 'sawtooth', 0.08],
+      [262, 0.2, 'sawtooth', 0.07],
+      [196, 0.5, 'sine', 0.1],
+    ]);
+  },
+
+  hunterShoot() {
+    this.playTone(150, 0.08, 'square', 0.15);
+    setTimeout(() => this.playTone(100, 0.3, 'sawtooth', 0.12), 80);
+  },
+
+  witchPotion() {
+    this.playSequence([
+      [880, 0.1, 'sine', 0.04],
+      [1047, 0.1, 'sine', 0.05],
+      [1319, 0.2, 'sine', 0.06],
+      [1047, 0.15, 'triangle', 0.04],
+    ]);
+  },
+
+  seerCheck() {
+    this.playSequence([
+      [659, 0.15, 'sine', 0.06],
+      [784, 0.15, 'sine', 0.07],
+      [988, 0.3, 'triangle', 0.08],
+    ]);
+  },
+
+  guardShield() {
+    this.playSequence([
+      [440, 0.15, 'triangle', 0.06],
+      [554, 0.15, 'triangle', 0.07],
+      [659, 0.25, 'sine', 0.08],
+    ]);
+  },
+
+  gameWin() {
+    this.playSequence([
+      [523, 0.15, 'triangle', 0.08],
+      [659, 0.15, 'triangle', 0.08],
+      [784, 0.15, 'triangle', 0.08],
+      [1047, 0.5, 'sine', 0.12],
+    ]);
+  },
+
+  gameLose() {
+    this.playSequence([
+      [392, 0.3, 'sine', 0.08],
+      [349, 0.3, 'sine', 0.07],
+      [330, 0.3, 'sine', 0.06],
+      [262, 0.6, 'triangle', 0.1],
+    ]);
+  },
+
+  click() {
+    this.playTone(440, 0.08, 'sine', 0.04);
+  },
+
+  toggleMute() {
+    this.muted = !this.muted;
+    return this.muted;
+  },
+
+  setVolume(v) {
+    this.volume = Math.max(0, Math.min(1, v));
+  },
+};
+
+// 兼容旧调用
+function playTone(freq, duration, type, vol) {
+  SoundManager.playTone(freq, duration, type, vol);
 }
 
 /* ========== 角色定义 ========== */
@@ -484,7 +717,154 @@ const ROLES = {
   witch:    { name: '女巫', icon: '🧪', color: '#a050dc', desc: '拥有一瓶解药和一瓶毒药，各可使用一次', team: 'villager' },
   hunter:   { name: '猎人', icon: '🏹', color: '#d4a843', desc: '被淘汰时可以开枪带走一名玩家', team: 'villager' },
   guard:    { name: '守卫', icon: '🛡️', color: '#3cc8b4', desc: '每晚可以守护一名玩家，不能连续守护同一人', team: 'villager' },
+  idiot:    { name: '白痴', icon: '🤪', color: '#ff9800', desc: '被投票出局时可翻牌存活，但失去投票权', team: 'villager' },
+  elder:    { name: '长老', icon: '👴', color: '#795548', desc: '有两条命，但被女巫毒杀直接死亡', team: 'villager' },
+  cupid:    { name: '丘比特', icon: '💘', color: '#e91e63', desc: '首夜可连接两名玩家为情侣，情侣同生共死', team: 'villager' },
 };
+
+/* ========== 表情/互动系统 ========== */
+const EMOTIONS = [
+  { id: 'clap', icon: '👏', name: '鼓掌', anim: 'bounce' },
+  { id: 'laugh', icon: '😂', name: '大笑', anim: 'shake' },
+  { id: 'think', icon: '🤔', name: '思考', anim: 'pulse' },
+  { id: 'angry', icon: '😤', name: '生气', anim: 'shake' },
+  { id: 'cry', icon: '😭', name: '哭泣', anim: 'float' },
+  { id: 'cool', icon: '😎', name: '酷', anim: 'spin' },
+  { id: 'scared', icon: '😱', name: '害怕', anim: 'shake' },
+  { id: 'heart', icon: '❤️', name: '爱心', anim: 'pulse' },
+  { id: 'thumbsup', icon: '👍', name: '点赞', anim: 'bounce' },
+  { id: 'thumbsdown', icon: '👎', name: '踩', anim: 'bounce' },
+  { id: 'skull', icon: '💀', name: '死亡', anim: 'float' },
+  { id: 'fire', icon: '🔥', name: '火焰', anim: 'pulse' },
+];
+
+const QUICK_MESSAGES = [
+  '我是好人',
+  '我是狼人',
+  '相信我',
+  '别投我',
+  '投他',
+  '过了',
+  '好人面大',
+  '狼面大',
+  '我有身份',
+  '没信息',
+];
+
+let emotionsMuted = false;
+let emotionAnimations = []; // 活跃的表情动画
+
+function toggleEmotionsMute() {
+  emotionsMuted = !emotionsMuted;
+  showToast(emotionsMuted ? '表情已静音' : '表情已开启');
+  const btn = document.getElementById('emotionMuteBtn');
+  if (btn) btn.textContent = emotionsMuted ? '🔇' : '📢';
+}
+
+function sendEmotion(emotionId) {
+  socket.emit('send-emotion', emotionId);
+  SoundManager.click();
+}
+
+function sendQuickMsg(msg) {
+  socket.emit('send-quick-msg', msg);
+  SoundManager.click();
+}
+
+socket.on('receive-emotion', (data) => {
+  if (emotionsMuted && data.socketId !== personal?.mySocketId) return;
+  showEmotionAnimation(data);
+});
+
+socket.on('quick-msg', (data) => {
+  showQuickMessage(data);
+});
+
+function showEmotionAnimation(data) {
+  const emotion = EMOTIONS.find(e => e.id === data.emotionId);
+  if (!emotion) return;
+
+  // 在玩家头像旁显示表情
+  const playerChip = document.querySelector(`[data-id="${data.socketId}"]`);
+  if (!playerChip) return;
+
+  const emojiEl = document.createElement('div');
+  emojiEl.className = `emotion-float emotion-${emotion.anim}`;
+  emojiEl.textContent = emotion.icon;
+  emojiEl.style.cssText = `
+    position: absolute;
+    top: -10px;
+    right: -10px;
+    font-size: 28px;
+    z-index: 100;
+    pointer-events: none;
+    animation: emotionPop 1.5s ease-out forwards;
+  `;
+  playerChip.style.position = 'relative';
+  playerChip.appendChild(emojiEl);
+
+  setTimeout(() => emojiEl.remove(), 1500);
+}
+
+function showQuickMessage(data) {
+  const chatBox = document.querySelector('.chat-box') || document.querySelector('.narration-body');
+  if (!chatBox) return;
+
+  const div = document.createElement('div');
+  div.className = 'quick-msg-bubble';
+  div.innerHTML = `
+    <span style="color:var(--purple-glow);font-weight:bold;">${escapeHtml(data.name)}:</span>
+    <span style="color:var(--text-bright);">${escapeHtml(data.msg)}</span>
+  `;
+  chatBox.appendChild(div);
+  chatBox.scrollTop = chatBox.scrollHeight;
+
+  setTimeout(() => div.remove(), 5000);
+}
+
+function renderEmotionPanel() {
+  if (!state || state.phase === 'lobby' || state.phase === 'role-reveal') return '';
+
+  const isAlive = state.players.find(p => p.socketId === personal?.mySocketId)?.alive;
+  const canSendQuickMsg = state.phase === 'day' || state.phase === 'sheriff-nominate' || state.phase === 'sheriff-speak';
+
+  return `
+    <div class="emotion-panel" id="emotionPanel">
+      <div class="emotion-header">
+        <button class="emotion-toggle-btn" onclick="toggleEmotionPanel()">
+          😊 表情
+        </button>
+        <button id="emotionMuteBtn" class="emotion-mute-btn" onclick="toggleEmotionsMute()">
+          ${emotionsMuted ? '🔇' : '📢'}
+        </button>
+      </div>
+      <div class="emotion-grid" id="emotionGrid" style="display:none;">
+        ${EMOTIONS.map(e => `
+          <button class="emotion-btn" onclick="sendEmotion('${e.id}')" title="${e.name}">
+            ${e.icon}
+          </button>
+        `).join('')}
+      </div>
+      ${canSendQuickMsg ? `
+        <div class="quick-msg-grid" id="quickMsgGrid" style="display:none;">
+          ${QUICK_MESSAGES.map(msg => `
+            <button class="quick-msg-btn" onclick="sendQuickMsg('${msg}')">
+              ${msg}
+            </button>
+          `).join('')}
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+function toggleEmotionPanel() {
+  const grid = document.getElementById('emotionGrid');
+  const quickGrid = document.getElementById('quickMsgGrid');
+  const isVisible = grid?.style.display !== 'none';
+  if (grid) grid.style.display = isVisible ? 'none' : 'grid';
+  if (quickGrid) quickGrid.style.display = isVisible ? 'none' : 'grid';
+}
 
 /* ========== Socket ========== */
 const socket = io();
@@ -492,6 +872,250 @@ let state = null;
 let personal = null;
 let myName = localStorage.getItem('ww_name') || '';
 let wwChatHistory = [];
+
+/* ========== 邀请链接系统 ========== */
+function generateInviteLink(roomId, password = null) {
+  const base = window.location.origin;
+  let link = `${base}?room=${roomId}`;
+  if (password) {
+    link += `&pwd=${encodeURIComponent(password)}`;
+  }
+  return link;
+}
+
+function copyInviteLink() {
+  if (!state || !state.roomId) return;
+  const link = generateInviteLink(state.roomId, state.hasPassword ? prompt('请输入房间密码以生成带密码的链接（无密码请留空）') : null);
+  navigator.clipboard.writeText(link).then(() => {
+    showToast('邀请链接已复制到剪贴板');
+  }).catch(() => {
+    // fallback
+    const input = document.createElement('input');
+    input.value = link;
+    document.body.appendChild(input);
+    input.select();
+    document.execCommand('copy');
+    document.body.removeChild(input);
+    showToast('邀请链接已复制到剪贴板');
+  });
+}
+
+function showInviteModal() {
+  if (!state || !state.roomId) return;
+  if (document.querySelector('.overlay.invite-overlay')) return;
+
+  const base = window.location.origin;
+  const linkNoPwd = `${base}?room=${state.roomId}`;
+  const linkWithPwd = state.hasPassword ? `${base}?room=${state.roomId}&pwd=密码` : null;
+
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div class="overlay invite-overlay" onclick="this.remove()">
+      <div class="modal" onclick="event.stopPropagation()" style="max-width:420px;">
+        <h2 style="text-align:center;">📨 邀请好友</h2>
+        <div class="text-center mb-16">
+          <div style="font-size:14px;color:var(--text-dim);margin-bottom:8px;">分享此链接邀请好友加入</div>
+          <div class="room-code" style="font-size:18px;letter-spacing:4px;">${state.roomId}</div>
+        </div>
+
+        <div style="margin-bottom:16px;">
+          <div style="font-size:13px;color:var(--text-dim);margin-bottom:6px;">普通链接（无密码）</div>
+          <div style="display:flex;gap:8px;">
+            <input class="input" value="${linkNoPwd}" readonly style="flex:1;font-size:12px;" onclick="this.select()">
+            <button class="btn btn-primary btn-sm" onclick="copyToClipboard('${linkNoPwd}')">复制</button>
+          </div>
+        </div>
+
+        ${linkWithPwd ? `
+          <div style="margin-bottom:16px;">
+            <div style="font-size:13px;color:var(--text-dim);margin-bottom:6px;">带密码链接（将"密码"替换为实际密码）</div>
+            <div style="display:flex;gap:8px;">
+              <input class="input" value="${linkWithPwd}" readonly style="flex:1;font-size:12px;" onclick="this.select()">
+              <button class="btn btn-primary btn-sm" onclick="copyToClipboard('${linkWithPwd}')">复制</button>
+            </div>
+          </div>
+        ` : ''}
+
+        <div style="text-align:center;margin-bottom:12px;">
+          <div style="font-size:13px;color:var(--text-dim);margin-bottom:8px;">或截图分享二维码</div>
+          <canvas id="qrCanvas" width="160" height="160" style="border:1px solid var(--border);border-radius:8px;"></canvas>
+        </div>
+
+        <button class="btn btn-primary mt-12" onclick="this.closest('.overlay').remove()" style="width:100%;">关闭</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(div.firstElementChild);
+
+  // 生成简单二维码（使用Canvas绘制）
+  setTimeout(() => generateQRCode(linkNoPwd), 100);
+}
+
+function generateQRCode(text) {
+  const canvas = document.getElementById('qrCanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const size = 160;
+  const cellSize = 4;
+  const modules = Math.floor(size / cellSize);
+
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, size, size);
+
+  // 简单的QR码生成（伪随机点阵）
+  ctx.fillStyle = '#000';
+  const hash = simpleHash(text);
+  for (let i = 0; i < modules; i++) {
+    for (let j = 0; j < modules; j++) {
+      // 边框定位点
+      if (i < 7 && j < 7) {
+        if (i === 0 || i === 6 || j === 0 || j === 6 ||
+            (i >= 2 && i <= 4 && j >= 2 && j <= 4)) {
+          ctx.fillRect(i * cellSize, j * cellSize, cellSize, cellSize);
+          continue;
+        }
+      }
+      if (i >= modules - 7 && j < 7) {
+        if (i === modules - 7 || i === modules - 1 || j === 0 || j === 6 ||
+            (i >= modules - 5 && i <= modules - 3 && j >= 2 && j <= 4)) {
+          ctx.fillRect(i * cellSize, j * cellSize, cellSize, cellSize);
+          continue;
+        }
+      }
+      if (i < 7 && j >= modules - 7) {
+        if (i === 0 || i === 6 || j === modules - 7 || j === modules - 1 ||
+            (i >= 2 && i <= 4 && j >= modules - 5 && j <= modules - 3)) {
+          ctx.fillRect(i * cellSize, j * cellSize, cellSize, cellSize);
+          continue;
+        }
+      }
+      // 数据区域
+      if ((hash * (i * modules + j + 1)) % 3 === 0) {
+        ctx.fillRect(i * cellSize, j * cellSize, cellSize, cellSize);
+      }
+    }
+  }
+}
+
+function simpleHash(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function copyToClipboard(text) {
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('已复制到剪贴板');
+  }).catch(() => {
+    const input = document.createElement('input');
+    input.value = text;
+    document.body.appendChild(input);
+    input.select();
+    document.execCommand('copy');
+    document.body.removeChild(input);
+    showToast('已复制到剪贴板');
+  });
+}
+
+// 检查URL参数，自动加入房间
+function checkUrlParams() {
+  const params = new URLSearchParams(window.location.search);
+  const roomId = params.get('room');
+  const pwd = params.get('pwd');
+
+  if (roomId && myName) {
+    // 自动尝试加入房间
+    socket.emit('join-room', roomId, myName, pwd || null, (res) => {
+      if (res.success) {
+        showToast('已通过邀请链接加入房间');
+      } else {
+        showToast(res.error || '加入失败');
+        // 清除URL参数
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+    });
+  } else if (roomId && !myName) {
+    // 需要先设置昵称
+    showToast('请先设置昵称，然后自动加入房间');
+    localStorage.setItem('ww_pendingRoom', roomId);
+    if (pwd) localStorage.setItem('ww_pendingPwd', pwd);
+  }
+}
+
+/* ========== 战绩系统 ========== */
+const StatsManager = {
+  KEY: 'ww_stats',
+
+  getStats() {
+    const data = localStorage.getItem(this.KEY);
+    if (!data) return this.getDefaultStats();
+    try {
+      return JSON.parse(data);
+    } catch {
+      return this.getDefaultStats();
+    }
+  },
+
+  getDefaultStats() {
+    return {
+      totalGames: 0,
+      wins: 0,
+      losses: 0,
+      roleStats: {},
+      maxWinStreak: 0,
+      currentWinStreak: 0,
+      totalRounds: 0,
+    };
+  },
+
+  saveStats(stats) {
+    localStorage.setItem(this.KEY, JSON.stringify(stats));
+  },
+
+  recordGame(winner, myRole, rounds) {
+    const stats = this.getStats();
+    const isWin = (winner === 'villager' && myRole !== 'werewolf') ||
+                  (winner === 'werewolf' && myRole === 'werewolf');
+
+    stats.totalGames++;
+    stats.totalRounds += rounds;
+
+    if (isWin) {
+      stats.wins++;
+      stats.currentWinStreak++;
+      if (stats.currentWinStreak > stats.maxWinStreak) {
+        stats.maxWinStreak = stats.currentWinStreak;
+      }
+    } else {
+      stats.losses++;
+      stats.currentWinStreak = 0;
+    }
+
+    if (!stats.roleStats[myRole]) {
+      stats.roleStats[myRole] = { games: 0, wins: 0 };
+    }
+    stats.roleStats[myRole].games++;
+    if (isWin) stats.roleStats[myRole].wins++;
+
+    this.saveStats(stats);
+  },
+
+  getWinRate() {
+    const stats = this.getStats();
+    if (stats.totalGames === 0) return 0;
+    return Math.round((stats.wins / stats.totalGames) * 100);
+  },
+
+  getRoleWinRate(role) {
+    const stats = this.getStats();
+    const roleStat = stats.roleStats[role];
+    if (!roleStat || roleStat.games === 0) return 0;
+    return Math.round((roleStat.wins / roleStat.games) * 100);
+  },
+};
 
 /* 旁白系统 */
 let narrationHistory = [];
@@ -522,8 +1146,8 @@ function getDefaultConfigForCount(count) {
 function getPresetConfig(preset, count) {
   if (preset === 'standard') return getDefaultConfigForCount(count);
   if (preset === 'all-roles') {
-    const specials = { seer: 1, witch: 1, hunter: 1, guard: 1 };
-    const specialCount = 4;
+    const specials = { seer: 1, witch: 1, hunter: 1, guard: 1, idiot: 1, elder: 1, cupid: 1 };
+    const specialCount = 7;
     const wolves = Math.max(1, Math.floor(count * 0.25));
     const villagers = count - wolves - specialCount;
     return { werewolf: wolves, ...specials, villager: Math.max(1, villagers) };
@@ -554,8 +1178,41 @@ function validateClientConfig(config, playerCount) {
 }
 
 socket.on('state', (s) => {
+  const prevPhase = state ? state.phase : null;
   if (s.phase === 'lobby' || s.phase === 'role-reveal') wwChatHistory = [];
+  if (s.phase === 'last-words') lastWordsChatHistory = [];
   state = s;
+
+  // 阶段切换音效
+  if (prevPhase !== s.phase) {
+    switch (s.phase) {
+      case 'night-werewolf':
+        SoundManager.nightFall(); break;
+      case 'day':
+        SoundManager.dayBreak(); break;
+      case 'vote':
+        SoundManager.voteStart(); break;
+      case 'tally':
+        SoundManager.voteEnd(); break;
+      case 'last-words':
+        SoundManager.playerDeath(); break;
+      case 'hunter-shoot':
+        SoundManager.hunterShoot(); break;
+      case 'sheriff-nominate':
+        SoundManager.voteStart(); break;
+      case 'sheriff-vote':
+        SoundManager.voteStart(); break;
+      case 'gameover':
+        if (s.winner === 'villager') SoundManager.gameWin();
+        else SoundManager.gameLose();
+        // 记录战绩
+        if (personal && personal.myRole) {
+          StatsManager.recordGame(s.winner, personal.myRole, s.round);
+        }
+        break;
+    }
+  }
+
   render();
 });
 socket.on('personal', (p) => { personal = p; render(); });
@@ -567,6 +1224,32 @@ socket.on('ww-chat', (msg) => {
 socket.on('vote-tick', (timeLeft) => {
   if (state) state.voteTimeLeft = timeLeft;
   updateVoteTimer(timeLeft);
+});
+
+socket.on('last-words-tick', (timeLeft) => {
+  lastWordsTimeLeft = timeLeft;
+  const timerEl = document.querySelector('.timer');
+  if (timerEl) timerEl.textContent = formatTime(timeLeft);
+});
+
+socket.on('last-words-msg', (msg) => {
+  lastWordsChatHistory.push(msg);
+  if (lastWordsChatHistory.length > 50) lastWordsChatHistory.shift();
+  const chatBox = document.querySelector('.chat-box');
+  if (chatBox) {
+    const div = document.createElement('div');
+    div.style.marginBottom = '8px';
+    div.innerHTML = `<span style="color:var(--gold);font-weight:bold;">${escapeHtml(msg.from)}:</span> <span style="color:var(--text);">${escapeHtml(msg.msg)}</span>`;
+    chatBox.appendChild(div);
+    chatBox.scrollTop = chatBox.scrollHeight;
+  }
+});
+
+let sheriffSpeakTimeLeft = 0;
+socket.on('sheriff-tick', (timeLeft) => {
+  sheriffSpeakTimeLeft = timeLeft;
+  const timerEl = document.querySelector('.sheriff-timer');
+  if (timerEl) timerEl.textContent = formatTime(timeLeft);
 });
 socket.on('error-msg', (msg) => {
   showToast(msg);
@@ -584,6 +1267,12 @@ socket.on('disconnect', () => {
   showToast('与服务器断开连接，正在重连...');
 });
 
+socket.on('kicked', (msg) => {
+  showToast(msg || '你被踢出了房间');
+  state = null;
+  render();
+});
+
 function showToast(msg) {
   const div = document.createElement('div');
   div.className = 'toast';
@@ -595,10 +1284,38 @@ function showToast(msg) {
 const app = document.getElementById('app');
 
 /* ========== 页面路由 ========== */
+function renderSoundControl() {
+  return `
+    <div id="soundControl" style="position:fixed;top:16px;right:16px;z-index:1000;display:flex;gap:8px;align-items:center;">
+      <button onclick="toggleSoundMute()" style="background:var(--bg-card);border:1px solid var(--border);border-radius:20px;padding:8px 12px;cursor:pointer;color:var(--text);font-size:14px;transition:all 0.3s;">
+        ${SoundManager.muted ? '🔇' : '🔊'}
+      </button>
+      <input type="range" min="0" max="100" value="${SoundManager.volume * 100}"
+        onchange="setSoundVolume(this.value)"
+        style="width:80px;accent-color:var(--purple);">
+    </div>
+  `;
+}
+
+function toggleSoundMute() {
+  SoundManager.toggleMute();
+  const btn = document.querySelector('#soundControl button');
+  if (btn) btn.textContent = SoundManager.muted ? '🔇' : '🔊';
+}
+
+function setSoundVolume(val) {
+  SoundManager.setVolume(val / 100);
+}
+
 function render() {
-  // 移除旧旁白面板
+  // 移除旧旁白面板和音效控制
   const oldPanel = document.getElementById('narrationPanel');
   if (oldPanel) oldPanel.remove();
+  const oldSound = document.getElementById('soundControl');
+  if (oldSound) oldSound.remove();
+
+  // 添加音效控制
+  document.body.insertAdjacentHTML('beforeend', renderSoundControl());
 
   if (!state) {
     app.innerHTML = renderLobby();
@@ -616,6 +1333,11 @@ function render() {
     case 'day': app.innerHTML = renderDay(); break;
     case 'vote': app.innerHTML = renderVote(); break;
     case 'tally': app.innerHTML = renderTally(); break;
+    case 'last-words': app.innerHTML = renderLastWords(); break;
+    case 'sheriff-nominate': app.innerHTML = renderSheriffNominate(); break;
+    case 'sheriff-speak': app.innerHTML = renderSheriffSpeak(); break;
+    case 'sheriff-vote': app.innerHTML = renderSheriffVote(); break;
+    case 'sheriff-transfer': app.innerHTML = renderSheriffTransfer(); break;
     case 'gameover': app.innerHTML = renderGameOver(); break;
     default: app.innerHTML = renderLobby();
   }
@@ -623,6 +1345,11 @@ function render() {
   // 游戏进行中显示旁白面板
   if (state.phase !== 'lobby') {
     document.body.insertAdjacentHTML('beforeend', renderNarrationPanel());
+  }
+
+  // 游戏进行中显示表情面板
+  if (state.phase !== 'lobby' && state.phase !== 'role-reveal') {
+    document.body.insertAdjacentHTML('beforeend', renderEmotionPanel());
   }
 }
 
@@ -663,18 +1390,34 @@ function renderLobby() {
         <div class="text-dim">分享给好友加入</div>
       </div>
 
-      <div style="font-size:13px;color:var(--text-dim);margin-bottom:8px;">玩家列表 (${state.players.length}人)</div>
+      <div style="font-size:13px;color:var(--text-dim);margin-bottom:8px;">玩家列表 (${state.players.length}人) ${state.hasPassword ? '🔒 需要密码' : ''}</div>
       <div class="player-grid mb-20">
         ${state.players.map(p => `
           <div class="player-chip">
             <div class="avatar ${p.gender}">👤</div>
             <div class="info">
-              <div class="name">${escapeHtml(p.name)} ${p.socketId === state.hostSocketId ? '<span class="badge badge-host">房主</span>' : ''} ${p.socketId === personal?.mySocketId ? '<span class="badge badge-me">我</span>' : ''}</div>
+              <div class="name">${escapeHtml(p.name)} ${p.socketId === state.hostSocketId ? '<span class="badge badge-host">房主</span>' : ''} ${p.socketId === personal?.mySocketId ? '<span class="badge badge-me">我</span>' : ''} ${p.socketId === state.sheriffId ? '<span class="badge badge-sheriff">⭐警长</span>' : ''}</div>
               <div class="number">${p.disconnected ? '<span style="color:var(--red)">已离线</span>' : '在线'}</div>
             </div>
+            ${isHost && p.socketId !== personal?.mySocketId ? `<button class="btn btn-ghost btn-sm" style="padding:4px 8px;font-size:12px;" onclick="app.kickPlayer('${p.socketId}')">踢出</button>` : ''}
           </div>
         `).join('')}
       </div>
+
+      ${state.spectators && state.spectators.length > 0 ? `
+        <div style="font-size:13px;color:var(--text-dim);margin-bottom:8px;">观战者 (${state.spectatorCount}人)</div>
+        <div class="player-grid mb-20">
+          ${state.spectators.map(s => `
+            <div class="player-chip" style="opacity:0.7;">
+              <div class="avatar">👁️</div>
+              <div class="info">
+                <div class="name">${escapeHtml(s.name)}</div>
+                <div class="number">观战中</div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
 
       ${renderRoleConfigSection(isHost)}
 
@@ -697,6 +1440,7 @@ function renderLobby() {
 
     <div class="text-center">
       <button class="btn btn-ghost btn-sm" onclick="app.leaveRoom()">离开房间</button>
+      <button class="btn btn-ghost btn-sm" onclick="showInviteModal()">📨 邀请好友</button>
       <button class="btn btn-ghost btn-sm" onclick="app.showRules()">📖 游戏规则</button>
     </div>
   `;
@@ -1218,6 +1962,21 @@ function renderDay() {
       <div class="player-grid mb-20">
         ${alive.map(p => renderPlayerChip(p))}
       </div>
+
+      ${state.spectators && state.spectators.length > 0 ? `
+        <div style="font-size:13px;color:var(--text-dim);margin-bottom:8px;">观战者 (${state.spectatorCount}人)：</div>
+        <div class="player-grid mb-20">
+          ${state.spectators.map(s => `
+            <div class="player-chip" style="opacity:0.6;">
+              <div class="avatar">👁️</div>
+              <div class="info">
+                <div class="name">${escapeHtml(s.name)}</div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
+
       ${renderLogs()}
     </div>
 
@@ -1236,12 +1995,13 @@ function renderVote() {
   const myVote = state.votes[personal?.mySocketId];
   const votedCount = Object.keys(state.votes).length;
   const canAct = personal?.canAct;
+  const isSheriff = personal?.mySocketId === state.sheriffId;
 
   return `
     <div class="header">
       <span class="phase-badge day">☀️ 白天 · 第 ${state.round} 天</span>
       <h1 style="font-size:28px;">投票放逐</h1>
-      <div class="subtitle">选择你认为的狼人</div>
+      <div class="subtitle">选择你认为的狼人 ${isSheriff ? '（你的票权重1.5票）' : ''}</div>
     </div>
 
     <div class="timer" id="voteTimer">${formatTime(state.voteTimeLeft || 0)}</div>
@@ -1330,10 +2090,229 @@ function renderTally() {
         </div>
       `}
 
-      ${isHost
-        ? `<div class="text-center"><button class="btn btn-primary" onclick="app.afterVoteResult()">继续</button></div>`
-        : `<div class="text-center text-dim">等待房主继续...</div>`
+      ${eliminated
+        ? `<div class="text-center text-dim">即将进入遗言阶段...</div>`
+        : (isHost
+          ? `<div class="text-center"><button class="btn btn-primary" onclick="app.afterVoteResult()">继续</button></div>`
+          : `<div class="text-center text-dim">等待房主继续...</div>`
+        )
       }
+    </div>
+  `;
+}
+
+/* ========== 遗言 ========== */
+let lastWordsChatHistory = [];
+let lastWordsTimeLeft = 0;
+
+function renderLastWords() {
+  const eliminatedId = state.lastWordsPlayer;
+  const eliminated = state.players.find(p => p.socketId === eliminatedId);
+  const isEliminated = personal?.mySocketId === eliminatedId;
+  const timeLeft = lastWordsTimeLeft;
+
+  return `
+    <div class="header">
+      <span class="phase-badge day">☀️ 白天 · 第 ${state.round} 天</span>
+      <h1 style="font-size:28px;">遗言时间</h1>
+      <div class="subtitle">${eliminated ? escapeHtml(eliminated.name) + ' 被放逐' : ''}</div>
+    </div>
+
+    <div class="card mb-20">
+      <div class="text-center mb-16">
+        <div style="font-size:36px;margin-bottom:8px;">${eliminated ? '💬' : '⏳'}</div>
+        <div style="font-size:18px;color:var(--text-bright);margin-bottom:4px;">
+          ${isEliminated ? '请发表你的遗言' : `${eliminated ? escapeHtml(eliminated.name) : '玩家'} 正在发表遗言...`}
+        </div>
+        <div class="timer" style="font-size:24px;">${formatTime(timeLeft)}</div>
+      </div>
+
+      <div class="chat-box mb-16" style="height:200px;overflow-y:auto;background:var(--bg-deep);border-radius:var(--radius-sm);padding:12px;">
+        ${lastWordsChatHistory.map(m => `
+          <div style="margin-bottom:8px;">
+            <span style="color:var(--gold);font-weight:bold;">${escapeHtml(m.from)}:</span>
+            <span style="color:var(--text);">${escapeHtml(m.msg)}</span>
+          </div>
+        `).join('')}
+        ${lastWordsChatHistory.length === 0 ? '<div class="text-dim">等待发言...</div>' : ''}
+      </div>
+
+      ${isEliminated ? `
+        <div class="flex-row" style="gap:8px;">
+          <input class="input" id="lastWordsInput" placeholder="输入遗言..." style="flex:1;"
+            onkeydown="if(event.key==='Enter')app.sendLastWords()" autocomplete="off">
+          <button class="btn btn-primary" onclick="app.sendLastWords()">发送</button>
+          <button class="btn btn-ghost" onclick="app.skipLastWords()">跳过</button>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+/* ========== 警长选举 ========== */
+function renderSheriffNominate() {
+  const isHost = state.hostSocketId === personal?.mySocketId;
+  const nominated = state.sheriffCandidates.includes(personal?.mySocketId);
+  const candidates = state.sheriffCandidates.map(id => state.players.find(p => p.socketId === id)).filter(Boolean);
+
+  return `
+    <div class="header">
+      <span class="phase-badge day">☀️ 白天 · 第 ${state.round} 天</span>
+      <h1 style="font-size:28px;">⭐ 警长竞选</h1>
+      <div class="subtitle">有意竞选的玩家请报名</div>
+    </div>
+
+    <div class="card mb-20">
+      <div class="text-center mb-16">
+        <div style="font-size:36px;margin-bottom:8px;">⭐</div>
+        <div style="font-size:16px;color:var(--text-bright);margin-bottom:12px;">
+          竞选警长可获得投票1.5票特权
+        </div>
+      </div>
+
+      ${candidates.length > 0 ? `
+        <div style="font-size:13px;color:var(--text-dim);margin-bottom:8px;">已报名竞选 (${candidates.length}人)</div>
+        <div class="player-grid mb-20">
+          ${candidates.map(p => `
+            <div class="player-chip">
+              <div class="avatar ${p.gender}">⭐</div>
+              <div class="info">
+                <div class="name">${escapeHtml(p.name)}</div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
+
+      <div class="flex-row" style="justify-content:center;gap:12px;">
+        ${!nominated ? `
+          <button class="btn btn-primary" onclick="app.nominateSheriff()">⭐ 我要竞选</button>
+        ` : `
+          <button class="btn btn-ghost" disabled>已报名</button>
+        `}
+        ${isHost ? `
+          <button class="btn btn-gold" onclick="app.endNomination()">确认名单</button>
+          <button class="btn btn-ghost" onclick="app.skipSheriffElection()">跳过选举</button>
+        ` : ''}
+      </div>
+      ${!isHost ? '<div class="text-center text-dim mt-12">等待房主确认...</div>' : ''}
+    </div>
+  `;
+}
+
+function renderSheriffSpeak() {
+  const currentId = state.sheriffCandidates[state.sheriffSpeakIdx];
+  const current = state.players.find(p => p.socketId === currentId);
+  const isMyTurn = personal?.mySocketId === currentId;
+  const isCandidate = state.sheriffCandidates.includes(personal?.mySocketId);
+
+  return `
+    <div class="header">
+      <span class="phase-badge day">☀️ 白天 · 第 ${state.round} 天</span>
+      <h1 style="font-size:28px;">⭐ 竞选演讲</h1>
+      <div class="subtitle">${state.sheriffSpeakIdx + 1} / ${state.sheriffCandidates.length}</div>
+    </div>
+
+    <div class="card mb-20">
+      <div class="text-center mb-16">
+        <div style="font-size:36px;margin-bottom:8px;">🎤</div>
+        <div style="font-size:18px;color:var(--text-bright);margin-bottom:4px;">
+          ${current ? escapeHtml(current.name) : '玩家'} 正在发言
+        </div>
+        <div class="sheriff-timer timer" style="font-size:24px;">${formatTime(sheriffSpeakTimeLeft)}</div>
+      </div>
+
+      ${isMyTurn ? `
+        <div class="highlight-box info mb-16">
+          <div style="color:var(--gold);">轮到你发言了！请向大家说明你适合当警长的理由。</div>
+        </div>
+      ` : isCandidate ? `
+        <div class="text-center text-dim">等待其他竞选者发言...</div>
+      ` : ''}
+
+      <div class="player-grid mb-20">
+        ${state.sheriffCandidates.map((id, idx) => {
+          const p = state.players.find(pl => pl.socketId === id);
+          if (!p) return '';
+          const isCurrent = idx === state.sheriffSpeakIdx;
+          return `
+            <div class="player-chip ${isCurrent ? 'active' : ''}" style="${isCurrent ? 'border-color:var(--gold);' : ''}">
+              <div class="avatar ${p.gender}">⭐</div>
+              <div class="info">
+                <div class="name">${escapeHtml(p.name)} ${isCurrent ? '🎤' : ''}</div>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderSheriffVote() {
+  const isCandidate = state.sheriffCandidates.includes(personal?.mySocketId);
+  const myVote = state.sheriffVotes[personal?.mySocketId];
+  const candidates = state.sheriffCandidates.map(id => state.players.find(p => p.socketId === id)).filter(Boolean);
+  const canVote = personal?.myAlive && !isCandidate;
+
+  return `
+    <div class="header">
+      <span class="phase-badge day">☀️ 白天 · 第 ${state.round} 天</span>
+      <h1 style="font-size:28px;">⭐ 投票选举警长</h1>
+      <div class="subtitle">选择你支持的竞选者</div>
+    </div>
+
+    <div class="card mb-20">
+      <div class="text-center mb-16">
+        <div style="font-size:36px;margin-bottom:8px;">🗳️</div>
+        <div style="font-size:16px;color:var(--text-bright);">
+          ${canVote ? '请投票选择警长' : isCandidate ? '你是竞选者，无法投票' : '你已出局，无法投票'}
+        </div>
+      </div>
+
+      <div class="player-grid mb-20">
+        ${candidates.map(p => renderPlayerChip(p, {
+          selectable: canVote && !myVote,
+          selected: myVote === p.socketId,
+          onClick: canVote && !myVote ? `app.voteSheriff('${p.socketId}')` : null,
+        }))}
+      </div>
+
+      ${myVote ? '<div class="text-center text-dim">你已投票，等待其他玩家...</div>' : ''}
+    </div>
+  `;
+}
+
+function renderSheriffTransfer() {
+  const alive = state.players.filter(p => p.alive && !p.disconnected);
+  const isDeadSheriff = personal?.mySocketId === state.hunterPending || !personal?.myAlive;
+
+  return `
+    <div class="header">
+      <h1 style="font-size:28px;">⭐ 警徽处理</h1>
+      <div class="subtitle">警长已死亡，需要处理警徽</div>
+    </div>
+
+    <div class="card mb-20">
+      <div class="text-center mb-16">
+        <div style="font-size:36px;margin-bottom:8px;">⭐</div>
+        <div style="font-size:16px;color:var(--text-bright);">
+          请选择将警徽移交给其他玩家，或撕毁警徽
+        </div>
+      </div>
+
+      <div class="player-grid mb-20">
+        ${alive.filter(p => p.socketId !== personal?.mySocketId).map(p => renderPlayerChip(p, {
+          selectable: true,
+          selected: app._sheriffTransferTarget === p.socketId,
+          onClick: `app._sheriffTransferTarget='${p.socketId}';render();`,
+        }))}
+      </div>
+
+      <div class="flex-row" style="justify-content:center;gap:12px;">
+        <button class="btn btn-primary" ${!app._sheriffTransferTarget ? 'disabled' : ''} onclick="app.transferSheriff(app._sheriffTransferTarget)">移交警徽</button>
+        <button class="btn btn-ghost" onclick="app.transferSheriff('destroy')">撕毁警徽</button>
+      </div>
     </div>
   `;
 }
@@ -1372,10 +2351,14 @@ function renderGameOver() {
         }).join('')}
       </div>
 
-      ${state.hostSocketId === personal?.mySocketId
-        ? `<div class="text-center mt-20"><button class="btn btn-primary btn-lg" onclick="app.restartGame()">再来一局 🔄</button></div>`
-        : `<div class="text-center text-dim mt-20">等待房主开始下一局...</div>`
-      }
+      <div class="text-center mt-20" style="display:flex;gap:12px;justify-content:center;">
+        <button class="btn btn-gold" onclick="app.showReplay()">📹 查看回放</button>
+        ${state.hostSocketId === personal?.mySocketId
+          ? `<button class="btn btn-primary btn-lg" onclick="app.restartGame()">再来一局 🔄</button>`
+          : ''
+        }
+      </div>
+      ${state.hostSocketId !== personal?.mySocketId ? '<div class="text-center text-dim mt-12">等待房主开始下一局...</div>' : ''}
     </div>
   `;
 }
@@ -1399,7 +2382,7 @@ function renderPlayerChip(p, opts = {}) {
     <div class="${cls}" data-id="${p.socketId}" ${onclick}>
       <div class="${avatarCls}">${emoji}</div>
       <div class="info">
-        <div class="name">${escapeHtml(p.name)} ${p.socketId === state.hostSocketId ? '<span class="badge badge-host">房主</span>' : ''} ${p.socketId === personal?.mySocketId ? '<span class="badge badge-me">我</span>' : ''} ${!p.alive ? '💀' : ''}</div>
+        <div class="name">${escapeHtml(p.name)} ${p.socketId === state.hostSocketId ? '<span class="badge badge-host">房主</span>' : ''} ${p.socketId === personal?.mySocketId ? '<span class="badge badge-me">我</span>' : ''} ${p.socketId === state.sheriffId ? '<span class="badge badge-sheriff">⭐警长</span>' : ''} ${!p.alive ? '💀' : ''}</div>
         <div class="number">${p.role && (!p.alive || state.phase === 'gameover') ? ROLES[p.role].name : '存活'}</div>
       </div>
     </div>
@@ -1429,7 +2412,24 @@ app.setName = function() {
   if (!name) return showToast('请输入昵称');
   myName = name;
   localStorage.setItem('ww_name', name);
-  app.showMenu();
+
+  // 检查是否有待加入的房间
+  const pendingRoom = localStorage.getItem('ww_pendingRoom');
+  const pendingPwd = localStorage.getItem('ww_pendingPwd');
+  if (pendingRoom) {
+    localStorage.removeItem('ww_pendingRoom');
+    localStorage.removeItem('ww_pendingPwd');
+    socket.emit('join-room', pendingRoom, myName, pendingPwd || null, (res) => {
+      if (res.success) {
+        showToast('已通过邀请链接加入房间');
+      } else {
+        showToast(res.error || '加入失败');
+        app.showMenu();
+      }
+    });
+  } else {
+    app.showMenu();
+  }
 };
 
 app.showMenu = function() {
@@ -1446,10 +2446,12 @@ app.showMenu = function() {
         <input class="input" id="joinRoomId" placeholder="输入房间号" style="max-width:160px;text-transform:uppercase;" autocomplete="off"
           onkeydown="if(event.key==='Enter')app.joinRoom()">
         <button class="btn btn-gold" onclick="app.joinRoom()">加入</button>
+        <button class="btn btn-ghost" onclick="app.spectateRoom()">👁️ 观战</button>
       </div>
     </div>
     <div class="text-center">
       <button class="btn btn-ghost btn-sm" onclick="app.resetName()">更换昵称</button>
+      <button class="btn btn-ghost btn-sm" onclick="app.showStats()">📊 战绩</button>
       <button class="btn btn-ghost btn-sm" onclick="app.showRules()">📖 游戏规则</button>
     </div>
   `;
@@ -1463,7 +2465,8 @@ app.resetName = function() {
 
 app.createRoom = function() {
   if (!myName) return showToast('请先设置昵称');
-  socket.emit('create-room', myName, (res) => {
+  const password = prompt('设置房间密码（留空表示无密码）：');
+  socket.emit('create-room', myName, password || null, (res) => {
     if (res.success) {
       showToast('房间创建成功');
     } else {
@@ -1477,13 +2480,34 @@ app.joinRoom = function() {
   const input = document.getElementById('joinRoomId');
   const roomId = input.value.trim().toUpperCase();
   if (!roomId) return showToast('请输入房间号');
-  socket.emit('join-room', roomId, myName, (res) => {
+  const password = prompt('请输入房间密码（如有）：');
+  socket.emit('join-room', roomId, myName, password || null, (res) => {
     if (res.success) {
       showToast('加入成功');
     } else {
       showToast(res.error || '加入失败');
     }
   });
+};
+
+app.spectateRoom = function() {
+  if (!myName) return showToast('请先设置昵称');
+  const input = document.getElementById('joinRoomId');
+  const roomId = input.value.trim().toUpperCase();
+  if (!roomId) return showToast('请输入房间号');
+  const password = prompt('请输入房间密码（如有）：');
+  socket.emit('spectate-room', roomId, myName, password || null, (res) => {
+    if (res.success) {
+      showToast('加入观战成功');
+    } else {
+      showToast(res.error || '加入观战失败');
+    }
+  });
+};
+
+app.kickPlayer = function(targetSocketId) {
+  if (!confirm('确定要踢出该玩家吗？')) return;
+  socket.emit('kick-player', targetSocketId);
 };
 
 app.leaveRoom = function() {
@@ -1497,17 +2521,17 @@ app.startGame = function() {
 
 app.confirmReveal = function() {
   socket.emit('confirm-reveal');
-  playTone(440, 0.15, 'sine');
+  SoundManager.click();
 };
 
 app.wwVote = function(targetId) {
   socket.emit('ww-vote', targetId);
-  playTone(330, 0.2, 'triangle');
+  SoundManager.playTone(330, 0.2, 'triangle', 0.06);
 };
 
 app.wwConfirmKill = function(targetId) {
   socket.emit('ww-confirm-kill', targetId);
-  playTone(280, 0.3, 'sawtooth');
+  SoundManager.playTone(280, 0.3, 'sawtooth', 0.08);
 };
 
 app.sendWwChat = function() {
@@ -1520,7 +2544,7 @@ app.sendWwChat = function() {
 
 app.seerCheck = function(targetId) {
   socket.emit('seer-check', targetId);
-  playTone(520, 0.2, 'sine');
+  SoundManager.seerCheck();
 };
 
 app._witchSave = false;
@@ -1569,7 +2593,7 @@ app.selectGuard = function(targetId) {
 app.guardAction = function(targetId) {
   socket.emit('guard-action', targetId);
   app._guardTarget = null;
-  playTone(400, 0.2, 'sine');
+  SoundManager.guardShield();
 };
 
 app.selectHunter = function(targetId) {
@@ -1580,7 +2604,7 @@ app.selectHunter = function(targetId) {
 app.hunterShoot = function(targetId) {
   socket.emit('hunter-shoot', targetId);
   app._hunterShot = null;
-  playTone(300, 0.2, 'triangle');
+  SoundManager.hunterShoot();
 };
 
 app.startVote = function() {
@@ -1589,7 +2613,42 @@ app.startVote = function() {
 
 app.castVote = function(targetId) {
   socket.emit('cast-vote', targetId);
-  playTone(440, 0.12, 'sine');
+  SoundManager.click();
+};
+
+app.sendLastWords = function() {
+  const input = document.getElementById('lastWordsInput');
+  if (!input) return;
+  const msg = input.value.trim();
+  if (!msg) return;
+  socket.emit('last-words', msg);
+  input.value = '';
+  input.focus();
+};
+
+app.skipLastWords = function() {
+  socket.emit('skip-last-words');
+};
+
+// 警长系统
+app.nominateSheriff = function() {
+  socket.emit('nominate-sheriff');
+};
+
+app.endNomination = function() {
+  socket.emit('end-nomination');
+};
+
+app.skipSheriffElection = function() {
+  socket.emit('skip-sheriff-election');
+};
+
+app.voteSheriff = function(candidateId) {
+  socket.emit('vote-sheriff', candidateId);
+};
+
+app.transferSheriff = function(targetId) {
+  socket.emit('transfer-sheriff', targetId);
 };
 
 app.afterVoteResult = function() {
@@ -1599,6 +2658,124 @@ app.afterVoteResult = function() {
 app.restartGame = function() {
   socket.emit('restart-game');
 };
+
+// 游戏回放
+app.showReplay = function() {
+  socket.emit('get-replay', (res) => {
+    if (res.success) {
+      renderReplayModal(res.replay);
+    } else {
+      showToast(res.error || '获取回放失败');
+    }
+  });
+};
+
+function renderReplayModal(replay) {
+  if (document.querySelector('.overlay.replay-overlay')) return;
+
+  const events = replay.replayData || [];
+  const duration = replay.duration || 0;
+  const minutes = Math.floor(duration / 60000);
+  const seconds = Math.floor((duration % 60000) / 1000);
+
+  const eventsHtml = events.map((e, idx) => {
+    const time = (e.time / 1000).toFixed(1);
+    let icon = '📌';
+    let desc = '';
+
+    switch (e.event) {
+      case 'game-start':
+        icon = '🎮';
+        desc = `游戏开始，${e.data.players.length} 名玩家`;
+        break;
+      case 'werewolf-kill':
+        icon = '🐺';
+        desc = `狼人选择猎杀 ${e.data.target}`;
+        break;
+      case 'seer-check':
+        icon = '🔮';
+        desc = `预言家查验 ${e.data.target}，结果：${e.data.result === 'werewolf' ? '狼人' : '好人'}`;
+        break;
+      case 'witch-action':
+        icon = '🧪';
+        desc = `女巫${e.data.save ? '使用解药' : ''}${e.data.save && e.data.poison ? '，' : ''}${e.data.poison ? '使用毒药' : '未使用药水'}`;
+        break;
+      case 'guard-action':
+        icon = '🛡️';
+        desc = e.data.target ? `守卫守护 ${e.data.target}` : '守卫未守护';
+        break;
+      case 'night-result':
+        icon = '🌙';
+        desc = e.data.killed.length > 0 ? `夜晚结果：${e.data.killed.join('、')} 死亡` : '平安夜';
+        break;
+      case 'vote-result':
+        icon = '🗳️';
+        desc = e.data.eliminated ? `投票结果：${e.data.eliminated} 被放逐` : '平票，无人被放逐';
+        break;
+      case 'game-over':
+        icon = '🏆';
+        desc = `游戏结束：${e.data.winner === 'villager' ? '好人阵营' : '狼人阵营'}获胜`;
+        break;
+      default:
+        icon = '📌';
+        desc = e.event;
+    }
+
+    return `
+      <div style="display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);">
+        <span style="color:var(--text-dim);font-size:12px;min-width:50px;">${time}s</span>
+        <span style="font-size:16px;">${icon}</span>
+        <span style="color:var(--text-bright);flex:1;">${desc}</span>
+      </div>
+    `;
+  }).join('');
+
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div class="overlay replay-overlay" onclick="this.remove()">
+      <div class="modal" onclick="event.stopPropagation()" style="max-width:600px;max-height:80vh;overflow-y:auto;">
+        <h2 style="text-align:center;">📹 游戏回放</h2>
+        <div style="display:flex;justify-content:space-around;margin-bottom:16px;">
+          <div class="text-center">
+            <div style="font-size:20px;font-weight:bold;color:var(--gold);">${replay.rounds || 0}</div>
+            <div style="color:var(--text-dim);font-size:12px;">总轮数</div>
+          </div>
+          <div class="text-center">
+            <div style="font-size:20px;font-weight:bold;color:var(--blue);">${minutes}:${seconds.toString().padStart(2, '0')}</div>
+            <div style="color:var(--text-dim);font-size:12px;">游戏时长</div>
+          </div>
+          <div class="text-center">
+            <div style="font-size:20px;font-weight:bold;color:${replay.winner === 'villager' ? 'var(--green)' : 'var(--red)'};">${replay.winner === 'villager' ? '好人胜' : '狼人胜'}</div>
+            <div style="color:var(--text-dim);font-size:12px;">结果</div>
+          </div>
+        </div>
+
+        <div style="font-size:13px;color:var(--text-dim);margin-bottom:8px;">玩家身份</div>
+        <div class="card mb-16" style="padding:12px;">
+          ${replay.players.map(p => {
+            const role = ROLES[p.role];
+            return `
+              <div style="display:flex;align-items:center;gap:8px;padding:4px 0;">
+                <span style="font-size:16px;">${role?.icon || '❓'}</span>
+                <span style="color:var(--text-bright);flex:1;">${escapeHtml(p.name)}</span>
+                <span style="color:${role?.color || 'var(--text)'};font-size:12px;">${role?.name || p.role}</span>
+                ${!p.alive ? '<span style="color:var(--red);font-size:12px;">💀</span>' : ''}
+              </div>
+            `;
+          }).join('')}
+        </div>
+
+        <div style="font-size:13px;color:var(--text-dim);margin-bottom:8px;">事件时间线</div>
+        <div class="card" style="padding:12px;">
+          ${eventsHtml || '<div class="text-dim">暂无回放数据</div>'}
+        </div>
+
+        <button class="btn btn-primary mt-20" onclick="this.closest('.overlay').remove()" style="width:100%;">关闭</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(div.firstElementChild);
+}
 
 app.toggleNarration = function() {
   socket.emit('toggle-narration');
@@ -1687,8 +2864,76 @@ app.showRules = function() {
   document.body.appendChild(div.firstElementChild);
 };
 
+app.showStats = function() {
+  if (document.querySelector('.overlay.stats-overlay')) return;
+
+  const stats = StatsManager.getStats();
+  const winRate = StatsManager.getWinRate();
+  const avgRounds = stats.totalGames > 0 ? Math.round(stats.totalRounds / stats.totalGames) : 0;
+
+  const roleStatsHtml = Object.entries(stats.roleStats).map(([role, data]) => {
+    const roleInfo = ROLES[role];
+    if (!roleInfo) return '';
+    const rate = data.games > 0 ? Math.round((data.wins / data.games) * 100) : 0;
+    return `
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">
+        <span style="font-size:18px;">${roleInfo.icon}</span>
+        <span style="flex:1;color:var(--text-bright);">${roleInfo.name}</span>
+        <span style="color:var(--text-dim);font-size:12px;">${data.games}场</span>
+        <span style="color:${rate >= 50 ? 'var(--green)' : 'var(--red)'};font-weight:bold;">${rate}%</span>
+      </div>
+    `;
+  }).join('');
+
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div class="overlay stats-overlay" onclick="this.remove()">
+      <div class="modal" onclick="event.stopPropagation()" style="max-width:400px;">
+        <h2 style="text-align:center;">📊 战绩统计</h2>
+        <div class="mb-16" style="text-align:center;">
+          <div style="font-size:36px;font-weight:bold;color:var(--gold);">${winRate}%</div>
+          <div style="color:var(--text-dim);">总胜率</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px;">
+          <div class="card" style="text-align:center;padding:12px;">
+            <div style="font-size:20px;font-weight:bold;color:var(--text-bright);">${stats.totalGames}</div>
+            <div style="color:var(--text-dim);font-size:12px;">总场次</div>
+          </div>
+          <div class="card" style="text-align:center;padding:12px;">
+            <div style="font-size:20px;font-weight:bold;color:var(--green);">${stats.wins}</div>
+            <div style="color:var(--text-dim);font-size:12px;">胜利</div>
+          </div>
+          <div class="card" style="text-align:center;padding:12px;">
+            <div style="font-size:20px;font-weight:bold;color:var(--red);">${stats.losses}</div>
+            <div style="color:var(--text-dim);font-size:12px;">失败</div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:16px;">
+          <div class="card" style="text-align:center;padding:12px;">
+            <div style="font-size:20px;font-weight:bold;color:var(--purple-glow);">${stats.maxWinStreak}</div>
+            <div style="color:var(--text-dim);font-size:12px;">最高连胜</div>
+          </div>
+          <div class="card" style="text-align:center;padding:12px;">
+            <div style="font-size:20px;font-weight:bold;color:var(--blue);">${avgRounds}</div>
+            <div style="color:var(--text-dim);font-size:12px;">平均轮数</div>
+          </div>
+        </div>
+        ${roleStatsHtml ? `
+          <div style="font-size:13px;color:var(--text-dim);margin-bottom:8px;">角色胜率</div>
+          <div class="card" style="padding:12px;">
+            ${roleStatsHtml}
+          </div>
+        ` : ''}
+        <button class="btn btn-primary mt-20" onclick="this.closest('.overlay').remove()" style="width:100%;">关闭</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(div.firstElementChild);
+};
+
 /* 初始化 */
 if (myName) app.showMenu(); else render();
+checkUrlParams();
 </script>
 </body>
 </html>

@@ -317,22 +317,151 @@ function drawStars() {
 }
 initStars(); drawStars();
 
-/* ========== 音效 ========== */
+/* ========== 音效系统 ========== */
 let audioCtx = null;
 function getAudioCtx() {
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   return audioCtx;
 }
-function playTone(freq, duration, type = 'sine', vol = 0.06) {
-  try {
-    const ac = getAudioCtx();
-    const osc = ac.createOscillator(); const gain = ac.createGain();
-    osc.type = type; osc.frequency.value = freq;
-    gain.gain.setValueAtTime(vol, ac.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + duration);
-    osc.connect(gain); gain.connect(ac.destination);
-    osc.start(); osc.stop(ac.currentTime + duration);
-  } catch(e) {}
+
+const SoundManager = {
+  muted: false,
+  volume: 0.5,
+
+  playTone(freq, duration, type = 'sine', vol = 0.06) {
+    if (this.muted) return;
+    try {
+      const ac = getAudioCtx();
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.type = type;
+      osc.frequency.value = freq;
+      const v = vol * this.volume;
+      gain.gain.setValueAtTime(v, ac.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(ac.destination);
+      osc.start();
+      osc.stop(ac.currentTime + duration);
+    } catch(e) {}
+  },
+
+  playSequence(notes) {
+    if (this.muted) return;
+    let delay = 0;
+    notes.forEach(([freq, dur, type, vol]) => {
+      setTimeout(() => this.playTone(freq, dur, type, vol), delay);
+      delay += dur * 1000 * 0.8;
+    });
+  },
+
+  // 场景音效
+  nightFall() {
+    this.playSequence([
+      [220, 0.4, 'sine', 0.08],
+      [196, 0.3, 'sine', 0.06],
+      [165, 0.6, 'sine', 0.1],
+    ]);
+  },
+
+  dayBreak() {
+    this.playSequence([
+      [392, 0.2, 'triangle', 0.06],
+      [440, 0.2, 'triangle', 0.07],
+      [523, 0.3, 'triangle', 0.08],
+      [659, 0.4, 'sine', 0.1],
+    ]);
+  },
+
+  voteStart() {
+    this.playSequence([
+      [523, 0.15, 'sine', 0.08],
+      [659, 0.15, 'sine', 0.08],
+      [784, 0.3, 'triangle', 0.1],
+    ]);
+  },
+
+  voteEnd() {
+    this.playSequence([
+      [440, 0.2, 'square', 0.06],
+      [349, 0.2, 'square', 0.06],
+      [294, 0.4, 'triangle', 0.08],
+    ]);
+  },
+
+  playerDeath() {
+    this.playSequence([
+      [330, 0.15, 'sawtooth', 0.08],
+      [262, 0.2, 'sawtooth', 0.07],
+      [196, 0.5, 'sine', 0.1],
+    ]);
+  },
+
+  hunterShoot() {
+    this.playTone(150, 0.08, 'square', 0.15);
+    setTimeout(() => this.playTone(100, 0.3, 'sawtooth', 0.12), 80);
+  },
+
+  witchPotion() {
+    this.playSequence([
+      [880, 0.1, 'sine', 0.04],
+      [1047, 0.1, 'sine', 0.05],
+      [1319, 0.2, 'sine', 0.06],
+      [1047, 0.15, 'triangle', 0.04],
+    ]);
+  },
+
+  seerCheck() {
+    this.playSequence([
+      [659, 0.15, 'sine', 0.06],
+      [784, 0.15, 'sine', 0.07],
+      [988, 0.3, 'triangle', 0.08],
+    ]);
+  },
+
+  guardShield() {
+    this.playSequence([
+      [440, 0.15, 'triangle', 0.06],
+      [554, 0.15, 'triangle', 0.07],
+      [659, 0.25, 'sine', 0.08],
+    ]);
+  },
+
+  gameWin() {
+    this.playSequence([
+      [523, 0.15, 'triangle', 0.08],
+      [659, 0.15, 'triangle', 0.08],
+      [784, 0.15, 'triangle', 0.08],
+      [1047, 0.5, 'sine', 0.12],
+    ]);
+  },
+
+  gameLose() {
+    this.playSequence([
+      [392, 0.3, 'sine', 0.08],
+      [349, 0.3, 'sine', 0.07],
+      [330, 0.3, 'sine', 0.06],
+      [262, 0.6, 'triangle', 0.1],
+    ]);
+  },
+
+  click() {
+    this.playTone(440, 0.08, 'sine', 0.04);
+  },
+
+  toggleMute() {
+    this.muted = !this.muted;
+    return this.muted;
+  },
+
+  setVolume(v) {
+    this.volume = Math.max(0, Math.min(1, v));
+  },
+};
+
+// 兼容旧调用
+function playTone(freq, duration, type, vol) {
+  SoundManager.playTone(freq, duration, type, vol);
 }
 
 /* ========== 角色定义 ========== */
@@ -1141,6 +1270,27 @@ function render() {
       case 'gameover': html = renderGameOver(); break;
       default: html = renderSetup();
     }
+
+    // 阶段切换音效
+    if (game.phase !== prevPhase) {
+      switch (game.phase) {
+        case 'night': case 'night-werewolf':
+          SoundManager.nightFall(); break;
+        case 'day':
+          SoundManager.dayBreak(); break;
+        case 'vote':
+          SoundManager.voteStart(); break;
+        case 'tally':
+          SoundManager.voteEnd(); break;
+        case 'hunter-shoot':
+          SoundManager.hunterShoot(); break;
+        case 'gameover':
+          if (game.winner === 'villager') SoundManager.gameWin();
+          else SoundManager.gameLose();
+          break;
+      }
+    }
+
     app.innerHTML = html || '';
   } while (game.phase !== prevPhase);
 }

@@ -21,11 +21,16 @@ const ROLES = {
   witch:    { name: '女巫', icon: '🧪', color: '#a050dc', desc: '拥有一瓶解药和一瓶毒药，各可使用一次', team: 'villager' },
   hunter:   { name: '猎人', icon: '🏹', color: '#d4a843', desc: '被淘汰时可以开枪带走一名玩家', team: 'villager' },
   guard:    { name: '守卫', icon: '🛡️', color: '#3cc8b4', desc: '每晚可以守护一名玩家，不能连续守护同一人', team: 'villager' },
+  idiot:    { name: '白痴', icon: '🤪', color: '#ff9800', desc: '被投票出局时可翻牌存活，但失去投票权', team: 'villager' },
+  elder:    { name: '长老', icon: '👴', color: '#795548', desc: '有两条命，但被女巫毒杀直接死亡', team: 'villager' },
+  cupid:    { name: '丘比特', icon: '💘', color: '#e91e63', desc: '首夜可连接两名玩家为情侣，情侣同生共死', team: 'villager' },
 };
 
 const MIN_PLAYERS = 6;
 const MAX_PLAYERS = 18;
 const VOTE_TIME_MS = 60000; // 白天投票限时60秒
+const LAST_WORDS_TIME_MS = 30000; // 遗言时间30秒
+const SHERIFF_SPEAK_TIME_MS = 15000; // 警长竞选发言时间15秒
 
 /* ===================== 房间管理 ===================== */
 const rooms = new Map(); // roomId -> Room
@@ -91,6 +96,7 @@ class Room {
     this.logs = [];
     this.chatHistory = []; // 狼人聊天历史
     this.createdAt = Date.now();
+    this.password = null; // 房间密码，null表示无密码
 
     // 夜间状态
     this.nightKill = null;
@@ -118,6 +124,27 @@ class Room {
     // 计时器
     this.voteTimer = null;
     this.phaseTimer = null;
+
+    // 遗言状态
+    this.lastWordsPlayer = null; // socketId of player giving last words
+    this.lastWordsChat = []; // { from, msg, time }
+    this.lastWordsTimer = null;
+
+    // 警长系统
+    this.sheriffId = null; // 警长 socketId
+    this.sheriffCandidates = []; // 竞选者 socketId 列表
+    this.sheriffVotes = {}; // { voterId: candidateId }
+    this.sheriffSpeakIdx = 0; // 当前发言的竞选者索引
+    this.sheriffTimer = null;
+    this.sheriffElectionDone = false; // 首日是否已选举过警长
+
+    // 游戏回放
+    this.replayData = []; // 回放数据：{ time, phase, event, data }
+    this.gameStartTime = null;
+
+    // 观战模式
+    this.spectators = []; // { socketId, name }
+    this.maxSpectators = 5; // 最大观战人数
   }
 
   addPlayer(socketId, name) {
@@ -147,6 +174,40 @@ class Room {
     }
     this.broadcastState();
     this.broadcastPersonal();
+  }
+
+  /* ===================== 观战系统 ===================== */
+  addSpectator(socketId, name) {
+    if (this.spectators.length >= this.maxSpectators) return false;
+    if (this.spectators.some(s => s.socketId === socketId)) return false;
+    this.spectators.push({ socketId, name });
+    this.broadcastState();
+    return true;
+  }
+
+  removeSpectator(socketId) {
+    const idx = this.spectators.findIndex(s => s.socketId === socketId);
+    if (idx === -1) return;
+    this.spectators.splice(idx, 1);
+    this.broadcastState();
+  }
+
+  isSpectator(socketId) {
+    return this.spectators.some(s => s.socketId === socketId);
+  }
+
+  getSpectatorState() {
+    // 观战者看不到夜间信息（狼人聊天、查验结果等）
+    const state = this.getClientState();
+    // 隐藏敏感信息
+    state.nightKill = null;
+    state.seerResult = null;
+    state.wwVotes = {};
+    state.wwVoteTally = {};
+    state.witchSaveUsed = this.witchSaveUsed;
+    state.witchPoisonUsed = this.witchPoisonUsed;
+    state.spectators = this.spectators.map(s => ({ name: s.name }));
+    return state;
   }
 
   autoSkipIfNeeded(disconnectedSocketId) {
@@ -221,6 +282,29 @@ class Room {
     if (this.logs.length > 100) this.logs.shift();
   }
 
+  recordReplay(event, data = {}) {
+    this.replayData.push({
+      time: Date.now() - (this.gameStartTime || Date.now()),
+      phase: this.phase,
+      round: this.round,
+      event,
+      data
+    });
+  }
+
+  getReplay() {
+    return {
+      roomId: this.roomId,
+      startTime: this.gameStartTime,
+      endTime: Date.now(),
+      duration: Date.now() - (this.gameStartTime || Date.now()),
+      players: this.players.map(p => ({ name: p.name, role: p.role, alive: p.alive })),
+      winner: this.winner,
+      rounds: this.round,
+      replayData: this.replayData,
+    };
+  }
+
   narrate(msg) {
     if (!this.narrationEnabled) return;
     io.to(this.roomId).emit('narration', { msg, time: Date.now() });
@@ -273,6 +357,17 @@ class Room {
       },
       narrationEnabled: this.narrationEnabled,
       roleConfig: this.roleConfig,
+      hasPassword: !!this.password,
+      lastWordsPlayer: this.lastWordsPlayer,
+      // 警长系统
+      sheriffId: this.sheriffId,
+      sheriffCandidates: this.sheriffCandidates,
+      sheriffVotes: this.sheriffVotes,
+      sheriffSpeakIdx: this.sheriffSpeakIdx,
+      sheriffElectionDone: this.sheriffElectionDone,
+      // 观战系统
+      spectators: this.spectators.map(s => ({ name: s.name })),
+      spectatorCount: this.spectators.length,
     };
   }
 
@@ -345,6 +440,15 @@ class Room {
     this.chatHistory = [];
     this.resetNightState();
     this.phase = 'role-reveal';
+
+    // 初始化回放数据
+    this.gameStartTime = Date.now();
+    this.replayData = [];
+    this.recordReplay('game-start', {
+      players: this.players.map(p => ({ name: p.name, role: p.role })),
+      config
+    });
+
     this.log('角色已分配，请大家查看身份！', 'system');
     this.narrate(`游戏开始！共 ${count} 名玩家，角色已分配，请查看身份。`);
     this.broadcastState();
@@ -399,6 +503,7 @@ class Room {
         this.nightKill = targets[0];
         const killName = this.players.find(pl => pl.socketId === this.nightKill)?.name;
         this.log(`狼人一致决定猎杀 ${killName}`, 'kill');
+        this.recordReplay('werewolf-kill', { target: killName });
         this.narrate(`狼人已达成一致，选定了今夜的猎物。`);
         this.phase = 'night-seer';
         this.broadcastState();
@@ -443,6 +548,7 @@ class Room {
     const isWolf = target.role === 'werewolf';
     this.seerResult = { targetId, result: isWolf ? 'werewolf' : 'good' };
     this.log(`预言家查验了 ${target.name}`, 'check');
+    this.recordReplay('seer-check', { target: target.name, result: isWolf ? 'werewolf' : 'good' });
     this.narrate('预言家完成查验，洞察了一人的身份。女巫，请睁眼...');
     this.broadcastState();
     this.broadcastPersonal();
@@ -473,6 +579,7 @@ class Room {
       }
     }
     this.log(`女巫使用了技能`, 'info');
+    this.recordReplay('witch-action', { save: !!this.witchSaveTarget, poison: !!this.witchPoisonTarget });
     this.narrate('女巫做出抉择，守卫请睁眼...');
     this.phase = 'night-guard';
     this.broadcastState();
@@ -490,8 +597,10 @@ class Room {
       if (!target) return;
       this.guardTarget = targetId;
       this.log(`守卫守护了 ${target.name}`, 'save');
+      this.recordReplay('guard-action', { target: target.name });
       this.narrate('守卫完成守护，所有人闭眼。天即将亮...');
     } else {
+      this.recordReplay('guard-action', { target: null });
       this.narrate('守卫选择不守护任何人。天即将亮...');
     }
     this.endNightPhase();
@@ -531,6 +640,15 @@ class Room {
       this.log('今夜是平安夜 🌙', 'save');
     }
 
+    // 记录夜晚结算回放
+    const nightResult = {
+      killed: this.eliminatedTonight.map(e => this.players.find(p => p.socketId === e.id)?.name).filter(Boolean),
+      saved: !!saveTarget,
+      guarded: !!guardTarget,
+      poisioned: !!poisonTarget ? this.players.find(p => p.socketId === poisonTarget)?.name : null,
+    };
+    this.recordReplay('night-result', nightResult);
+
     // 旁白：夜晚结算摘要
     if (this.eliminatedTonight.length > 0) {
       const names = this.eliminatedTonight.map(e => this.players.find(p => p.socketId === e.id)?.name).filter(Boolean);
@@ -562,8 +680,15 @@ class Room {
     }
 
     if (this.checkGameOver()) return;
-    this.phase = 'day';
-    this.log('☀️ 天亮了，进入讨论和投票阶段', 'system');
+
+    // 第一天进入警长选举阶段
+    if (this.round === 1 && !this.sheriffElectionDone) {
+      this.startSheriffElection();
+    } else {
+      this.phase = 'day';
+      this.log('☀️ 天亮了，进入讨论和投票阶段', 'system');
+    }
+
     this.broadcastState();
     this.broadcastPersonal();
   }
@@ -571,9 +696,38 @@ class Room {
   killPlayer(socketId, cause) {
     const p = this.players.find(pl => pl.socketId === socketId);
     if (!p || !p.alive) return false;
+
+    // 白痴被投票出局时翻牌存活
+    if (p.role === 'idiot' && cause === 'vote' && !p.revealed) {
+      p.revealed = true;
+      p.canVote = false;
+      this.log(`${p.name} 是白痴，翻牌存活但失去投票权`, 'info');
+      this.narrate(`${p.name} 被放逐，但亮出白痴身份，免于死亡！`);
+      return 'idiot_survived';
+    }
+
+    // 长老有两条命（被毒杀除外）
+    if (p.role === 'elder' && cause !== 'poison' && !p.elderUsed) {
+      p.elderUsed = true;
+      this.log(`${p.name} 是长老，第一次死亡免伤`, 'info');
+      this.narrate(`${p.name} 受到致命伤害，但长老身份保护了他！`);
+      return 'elder_survived';
+    }
+
     p.alive = false;
     const causeText = cause === 'vote' ? '被投票放逐' : cause === 'poison' ? '被女巫毒杀' : cause === 'hunter' ? '被猎人开枪带走' : '被狼人猎杀';
     this.log(`${p.name} ${causeText}`, 'kill');
+
+    // 警长死亡，需要处理警徽
+    if (this.sheriffId === socketId) {
+      this.handleSheriffDeath(socketId);
+      if (p.role === 'hunter' && cause !== 'hunter') {
+        this.hunterPending = p.socketId;
+        this.log(`${p.name} 是猎人，技能发动！`, 'info');
+        return 'hunter_dying';
+      }
+      return 'sheriff_dying';
+    }
 
     if (p.role === 'hunter' && cause !== 'hunter') {
       this.hunterPending = p.socketId;
@@ -666,8 +820,10 @@ class Room {
     this.voteTimeLeft = 0;
 
     const tally = {};
-    for (const [, targetId] of Object.entries(this.votes)) {
-      tally[targetId] = (tally[targetId] || 0) + 1;
+    for (const [voterId, targetId] of Object.entries(this.votes)) {
+      // 警长投票算1.5票
+      const weight = voterId === this.sheriffId ? 1.5 : 1;
+      tally[targetId] = (tally[targetId] || 0) + weight;
     }
 
     let maxVotes = 0, topCandidates = [];
@@ -681,14 +837,255 @@ class Room {
       eliminatedId = topCandidates[0];
       const ep = this.players.find(pl => pl.socketId === eliminatedId);
       this.log(`${ep.name} 被投票放逐 (${maxVotes}票)`, 'vote');
+      this.recordReplay('vote-result', { eliminated: ep.name, votes: maxVotes, tally });
       this.narrate(`投票结束！${ep.name} 以 ${maxVotes} 票被放逐。`);
     } else {
       this.log(topCandidates.length > 1 ? '平票！无人被放逐' : '无人投票，无人被放逐', 'vote');
+      this.recordReplay('vote-result', { eliminated: null, tally });
       this.narrate(topCandidates.length > 1 ? '投票结束！出现平票，本轮无人被放逐。' : '投票结束！无人投票，本轮无人被放逐。');
     }
 
     this._pendingElimination = eliminatedId;
     this._voteTally = tally;
+
+    // 如果有人被放逐，进入遗言阶段
+    if (eliminatedId) {
+      this.startLastWords(eliminatedId);
+    } else {
+      this.broadcastState();
+      this.broadcastPersonal();
+    }
+  }
+
+  startLastWords(playerId) {
+    this.phase = 'last-words';
+    this.lastWordsPlayer = playerId;
+    this.lastWordsChat = [];
+    const ep = this.players.find(p => p.socketId === playerId);
+    this.log(`${ep?.name} 开始发表遗言`, 'info');
+    this.narrate(`${ep?.name} 被放逐了，可以发表最后的遗言...`);
+    this.broadcastState();
+    this.broadcastPersonal();
+
+    // 遗言倒计时
+    let remaining = LAST_WORDS_TIME_MS;
+    this.lastWordsTimer = setInterval(() => {
+      remaining -= 1000;
+      io.to(this.roomId).emit('last-words-tick', remaining);
+      if (remaining <= 0) {
+        this.endLastWords();
+      }
+    }, 1000);
+  }
+
+  sendLastWords(socketId, message) {
+    if (this.phase !== 'last-words') return;
+    if (socketId !== this.lastWordsPlayer) return;
+    const p = this.getPlayer(socketId);
+    if (!p) return;
+
+    const payload = { from: p.name, msg: message, time: Date.now() };
+    this.lastWordsChat.push(payload);
+    io.to(this.roomId).emit('last-words-msg', payload);
+  }
+
+  endLastWords() {
+    if (this.lastWordsTimer) {
+      clearInterval(this.lastWordsTimer);
+      this.lastWordsTimer = null;
+    }
+    this.lastWordsPlayer = null;
+    this.lastWordsChat = [];
+    this.afterVoteResult();
+  }
+
+  /* ===================== 警长选举 ===================== */
+  startSheriffElection() {
+    this.phase = 'sheriff-nominate';
+    this.sheriffCandidates = [];
+    this.sheriffVotes = {};
+    this.sheriffSpeakIdx = 0;
+    const alive = this.getAlivePlayers();
+    this.log('⭐ 天亮了！现在开始警长竞选', 'system');
+    this.narrate('天亮了！今天将选举警长，请有意竞选的玩家举手报名。');
+  }
+
+  nominateSheriff(socketId) {
+    if (this.phase !== 'sheriff-nominate') return;
+    const p = this.getPlayer(socketId);
+    if (!p || !p.alive || p.disconnected) return;
+    if (this.sheriffCandidates.includes(socketId)) return;
+    this.sheriffCandidates.push(socketId);
+    this.log(`${p.name} 报名竞选警长`, 'info');
+    this.broadcastState();
+  }
+
+  endNomination() {
+    if (this.phase !== 'sheriff-nominate') return;
+    if (this.sheriffCandidates.length === 0) {
+      this.log('无人竞选警长，跳过选举', 'info');
+      this.narrate('无人竞选警长，跳过选举。');
+      this.sheriffElectionDone = true;
+      this.phase = 'day';
+      this.broadcastState();
+      this.broadcastPersonal();
+      return;
+    }
+    if (this.sheriffCandidates.length === 1) {
+      this.sheriffId = this.sheriffCandidates[0];
+      const sheriff = this.getPlayer(this.sheriffId);
+      this.log(`${sheriff.name} 当选警长（唯一竞选者）`, 'info');
+      this.narrate(`${sheriff.name} 当选为警长！`);
+      this.sheriffElectionDone = true;
+      this.phase = 'day';
+      this.broadcastState();
+      this.broadcastPersonal();
+      return;
+    }
+    this.phase = 'sheriff-speak';
+    this.sheriffSpeakIdx = 0;
+    this.startSheriffSpeak();
+  }
+
+  startSheriffSpeak() {
+    const candidateId = this.sheriffCandidates[this.sheriffSpeakIdx];
+    const p = this.getPlayer(candidateId);
+    this.narrate(`请 ${p.name} 发表竞选演讲（15秒）`);
+    this.broadcastState();
+    this.broadcastPersonal();
+
+    // 发言计时
+    let remaining = SHERIFF_SPEAK_TIME_MS;
+    this.sheriffTimer = setInterval(() => {
+      remaining -= 1000;
+      io.to(this.roomId).emit('sheriff-tick', remaining);
+      if (remaining <= 0) {
+        this.nextSheriffSpeak();
+      }
+    }, 1000);
+  }
+
+  nextSheriffSpeak() {
+    if (this.sheriffTimer) {
+      clearInterval(this.sheriffTimer);
+      this.sheriffTimer = null;
+    }
+    this.sheriffSpeakIdx++;
+    if (this.sheriffSpeakIdx >= this.sheriffCandidates.length) {
+      // 所有竞选者发言完毕，进入投票
+      this.phase = 'sheriff-vote';
+      this.sheriffVotes = {};
+      this.narrate('所有竞选者发言完毕，开始投票选举警长！');
+    } else {
+      this.startSheriffSpeak();
+    }
+    this.broadcastState();
+    this.broadcastPersonal();
+  }
+
+  voteSheriff(socketId, candidateId) {
+    if (this.phase !== 'sheriff-vote') return;
+    const p = this.getPlayer(socketId);
+    if (!p || !p.alive || p.disconnected) return;
+    if (!this.sheriffCandidates.includes(candidateId)) return;
+    this.sheriffVotes[socketId] = candidateId;
+    this.broadcastState();
+
+    // 检查是否所有人都投了票
+    const alive = this.getAlivePlayers();
+    const voters = alive.filter(pl => !this.sheriffCandidates.includes(pl.socketId));
+    if (Object.keys(this.sheriffVotes).length >= voters.length) {
+      this.endSheriffVote();
+    }
+  }
+
+  endSheriffVote() {
+    if (this.sheriffTimer) {
+      clearInterval(this.sheriffTimer);
+      this.sheriffTimer = null;
+    }
+
+    const tally = {};
+    for (const [, candidateId] of Object.entries(this.sheriffVotes)) {
+      tally[candidateId] = (tally[candidateId] || 0) + 1;
+    }
+
+    let maxVotes = 0, topCandidates = [];
+    for (const [cid, cnt] of Object.entries(tally)) {
+      if (cnt > maxVotes) { maxVotes = cnt; topCandidates = [cid]; }
+      else if (cnt === maxVotes) topCandidates.push(cid);
+    }
+
+    if (topCandidates.length === 1) {
+      this.sheriffId = topCandidates[0];
+      const sheriff = this.getPlayer(this.sheriffId);
+      this.log(`${sheriff.name} 当选警长（${maxVotes}票）`, 'info');
+      this.narrate(`投票结束！${sheriff.name} 以 ${maxVotes} 票当选为警长！`);
+    } else {
+      // 平票，随机选一个
+      const randomIdx = Math.floor(Math.random() * topCandidates.length);
+      this.sheriffId = topCandidates[randomIdx];
+      const sheriff = this.getPlayer(this.sheriffId);
+      this.log(`${sheriff.name} 当选警长（平票随机）`, 'info');
+      this.narrate(`出现平票！${sheriff.name} 随机当选为警长！`);
+    }
+
+    this.sheriffElectionDone = true;
+    this.phase = 'day';
+    this.broadcastState();
+    this.broadcastPersonal();
+  }
+
+  skipSheriffElection() {
+    if (this.phase !== 'sheriff-nominate') return;
+    this.log('跳过警长选举', 'info');
+    this.narrate('跳过警长选举。');
+    this.sheriffElectionDone = true;
+    this.phase = 'day';
+    this.broadcastState();
+    this.broadcastPersonal();
+  }
+
+  handleSheriffDeath(socketId) {
+    if (this.sheriffId !== socketId) return;
+    const p = this.getPlayer(socketId);
+    if (!p) return;
+
+    // 警长死亡，需要移交警徽或撕毁
+    this.phase = 'sheriff-transfer';
+    this.narrate(`${p.name} 是警长，需要处理警徽...`);
+    this.broadcastState();
+    this.broadcastPersonal();
+  }
+
+  transferSheriff(targetId) {
+    if (this.phase !== 'sheriff-transfer') return;
+    if (targetId === 'destroy') {
+      this.log('警徽被撕毁', 'info');
+      this.narrate('警徽被撕毁，不再有警长。');
+      this.sheriffId = null;
+    } else {
+      const target = this.getPlayer(targetId);
+      if (target && target.alive) {
+        this.sheriffId = targetId;
+        this.log(`警徽移交给 ${target.name}`, 'info');
+        this.narrate(`警徽移交给 ${target.name}！`);
+      }
+    }
+    this.afterSheriffTransfer();
+  }
+
+  afterSheriffTransfer() {
+    // 判断是夜间死亡还是白天死亡
+    const wasNight = this.eliminatedTonight.some(e => e.hunterActive);
+    if (wasNight) {
+      this.phase = 'day';
+      this.log('☀️ 天亮了，进入讨论和投票阶段', 'system');
+    } else {
+      if (this.checkGameOver()) return;
+      this.startNewRound();
+      return;
+    }
     this.broadcastState();
     this.broadcastPersonal();
   }
@@ -704,6 +1101,20 @@ class Room {
       if (result === 'hunter_dying') {
         this.narrate(`${ep?.name} 被放逐，作为猎人发动了技能！`);
         this.phase = 'hunter-shoot';
+        this.broadcastState();
+        this.broadcastPersonal();
+        return;
+      }
+      // 白痴翻牌存活，继续游戏
+      if (result === 'idiot_survived') {
+        this.broadcastState();
+        this.broadcastPersonal();
+        // 不进入夜晚，继续当前阶段
+        return;
+      }
+      // 警长死亡，需要处理警徽
+      if (result === 'sheriff_dying') {
+        this.narrate(`${ep?.name} 是警长，需要处理警徽...`);
         this.broadcastState();
         this.broadcastPersonal();
         return;
@@ -731,6 +1142,7 @@ class Room {
       this.winner = 'villager';
       this.phase = 'gameover';
       this.log('🏆 好人阵营获胜！所有狼人已被消灭', 'system');
+      this.recordReplay('game-over', { winner: 'villager', wolves: 0, villagers });
       this.narrate('游戏结束！所有狼人已被消灭，好人阵营获胜！村庄恢复和平。');
       this.broadcastState();
       this.broadcastPersonal();
@@ -740,6 +1152,7 @@ class Room {
       this.winner = 'werewolf';
       this.phase = 'gameover';
       this.log('🐺 狼人阵营获胜！黑暗降临', 'system');
+      this.recordReplay('game-over', { winner: 'werewolf', wolves, villagers });
       this.narrate('游戏结束！狼人数量已超过好人，狼人阵营获胜！黑暗笼罩村庄。');
       this.broadcastState();
       this.broadcastPersonal();
@@ -768,24 +1181,40 @@ class Room {
 /* ===================== Socket.io 事件 ===================== */
 
 io.on('connection', (socket) => {
-  socket.on('create-room', (name, callback) => {
+  socket.on('create-room', (name, password, callback) => {
     const roomId = generateRoomId();
     const room = new Room(roomId, socket.id, name);
+    if (password) room.password = password;
     rooms.set(roomId, room);
     socket.join(roomId);
     room.addPlayer(socket.id, name);
     callback({ success: true, roomId });
   });
 
-  socket.on('join-room', (roomId, name, callback) => {
+  socket.on('join-room', (roomId, name, password, callback) => {
     const room = rooms.get(roomId.toUpperCase());
     if (!room) return callback({ success: false, error: '房间不存在' });
-    if (room.phase !== 'lobby') return callback({ success: false, error: '游戏已开始' });
+    if (room.phase !== 'lobby') return callback({ success: false, error: '游戏已开始，无法加入' });
     if (room.players.length >= MAX_PLAYERS) return callback({ success: false, error: '房间已满' });
     if (room.players.some(p => p.name === name)) return callback({ success: false, error: '昵称已存在' });
+    if (room.password && room.password !== password) return callback({ success: false, error: '密码错误' });
     socket.join(roomId);
     room.addPlayer(socket.id, name);
     callback({ success: true, roomId });
+  });
+
+  socket.on('spectate-room', (roomId, name, password, callback) => {
+    const room = rooms.get(roomId.toUpperCase());
+    if (!room) return callback({ success: false, error: '房间不存在' });
+    if (room.password && room.password !== password) return callback({ success: false, error: '密码错误' });
+    if (room.spectators.length >= room.maxSpectators) return callback({ success: false, error: '观战人数已满' });
+    socket.join(roomId);
+    const success = room.addSpectator(socket.id, name);
+    if (success) {
+      callback({ success: true, roomId, isSpectator: true });
+    } else {
+      callback({ success: false, error: '无法加入观战' });
+    }
   });
 
   socket.on('start-game', () => {
@@ -794,6 +1223,17 @@ io.on('connection', (socket) => {
     if (!room.startGame()) {
       socket.emit('error-msg', '至少需要6名玩家');
     }
+  });
+
+  socket.on('kick-player', (targetSocketId) => {
+    const room = findRoomBySocket(socket.id);
+    if (!room || room.hostSocketId !== socket.id) return;
+    if (room.phase !== 'lobby') return;
+    const target = room.players.find(p => p.socketId === targetSocketId);
+    if (!target) return;
+    room.removePlayer(targetSocketId);
+    io.to(targetSocketId).emit('kicked', '你被房主踢出了房间');
+    room.broadcastState();
   });
 
   socket.on('confirm-reveal', () => {
@@ -851,9 +1291,51 @@ io.on('connection', (socket) => {
     if (room && room.hostSocketId === socket.id) room.afterVoteResult();
   });
 
+  socket.on('last-words', (message) => {
+    const room = findRoomBySocket(socket.id);
+    if (room) room.sendLastWords(socket.id, message);
+  });
+
+  socket.on('skip-last-words', () => {
+    const room = findRoomBySocket(socket.id);
+    if (room && room.lastWordsPlayer === socket.id) room.endLastWords();
+  });
+
+  // 警长系统
+  socket.on('nominate-sheriff', () => {
+    const room = findRoomBySocket(socket.id);
+    if (room) room.nominateSheriff(socket.id);
+  });
+
+  socket.on('end-nomination', () => {
+    const room = findRoomBySocket(socket.id);
+    if (room && room.hostSocketId === socket.id) room.endNomination();
+  });
+
+  socket.on('skip-sheriff-election', () => {
+    const room = findRoomBySocket(socket.id);
+    if (room && room.hostSocketId === socket.id) room.skipSheriffElection();
+  });
+
+  socket.on('vote-sheriff', (candidateId) => {
+    const room = findRoomBySocket(socket.id);
+    if (room) room.voteSheriff(socket.id, candidateId);
+  });
+
+  socket.on('transfer-sheriff', (targetId) => {
+    const room = findRoomBySocket(socket.id);
+    if (room) room.transferSheriff(targetId);
+  });
+
   socket.on('restart-game', () => {
     const room = findRoomBySocket(socket.id);
     if (room && room.hostSocketId === socket.id) room.restart();
+  });
+
+  socket.on('get-replay', (callback) => {
+    const room = findRoomBySocket(socket.id);
+    if (!room) return callback?.({ success: false, error: '房间不存在' });
+    callback?.({ success: true, replay: room.getReplay() });
   });
 
   socket.on('toggle-narration', () => {
@@ -885,11 +1367,45 @@ io.on('connection', (socket) => {
     }
   });
 
+  // 表情/互动系统
+  socket.on('send-emotion', (emotionId) => {
+    const room = findRoomBySocket(socket.id);
+    if (!room) return;
+    const player = room.players.find(p => p.socketId === socket.id);
+    if (!player || !player.alive) return; // 死亡玩家不能发表情
+
+    // 广播给房间所有人（包括玩家和观战者）
+    io.to(room.roomId).emit('receive-emotion', {
+      socketId: socket.id,
+      name: player.name,
+      emotionId,
+      time: Date.now()
+    });
+  });
+
+  socket.on('send-quick-msg', (msg) => {
+    const room = findRoomBySocket(socket.id);
+    if (!room) return;
+    const player = room.players.find(p => p.socketId === socket.id);
+    if (!player) return;
+
+    // 只在白天阶段可以发快捷消息
+    if (room.phase !== 'day' && room.phase !== 'sheriff-nominate' && room.phase !== 'sheriff-speak') return;
+
+    io.to(room.roomId).emit('quick-msg', {
+      socketId: socket.id,
+      name: player.name,
+      msg,
+      time: Date.now()
+    });
+  });
+
   socket.on('disconnect', () => {
     const room = findRoomBySocket(socket.id);
     if (room) {
       room.removePlayer(socket.id);
-      if (room.players.length === 0) {
+      room.removeSpectator(socket.id);
+      if (room.players.length === 0 && room.spectators.length === 0) {
         rooms.delete(room.roomId);
       }
     }
