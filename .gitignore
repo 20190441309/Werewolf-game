@@ -6,3 +6,6 @@ test-results/
 FEATURE_ITERATION.md
 .playwright-mcp/
 .claude/
+./github\workflows/
+DEVELOPMENT_PLAN.md
+TEST_PLAN.md
