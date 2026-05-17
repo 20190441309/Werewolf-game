@@ -2860,20 +2860,45 @@ app.showRules = function() {
     <div class="overlay rules-overlay" onclick="this.remove()">
       <div class="modal" onclick="event.stopPropagation()" style="max-width:540px;text-align:left;">
         <h2 style="text-align:center;">📖 游戏规则</h2>
-        <div style="font-size:13px;line-height:2;color:var(--text-dim);">
-          <p><strong style="color:var(--red);">🐺 狼人</strong> — 每晚猎杀一名玩家，白天伪装成村民</p>
+        <div style="font-size:13px;line-height:2;color:var(--text-dim);max-height:60vh;overflow-y:auto;">
+          <p><strong style="color:var(--gold);">🎭 角色介绍</strong></p>
+          <p><strong style="color:var(--red);">🐺 狼人</strong> — 每晚与其他狼人商议并猎杀一名玩家</p>
           <p><strong style="color:var(--green);">👨‍🌾 村民</strong> — 无特殊能力，通过推理找出狼人</p>
           <p><strong style="color:var(--blue);">🔮 预言家</strong> — 每晚查验一名玩家的身份</p>
           <p><strong style="color:#a050dc;">🧪 女巫</strong> — 拥有一瓶解药和一瓶毒药，各限一次</p>
           <p><strong style="color:var(--gold);">🏹 猎人</strong> — 被淘汰时可开枪带走一名玩家</p>
           <p><strong style="color:#3cc8b4;">🛡️ 守卫</strong> — 每晚守护一名玩家，不可连续守护同一人</p>
+          <p><strong style="color:#ff9800;">🤪 白痴</strong> — 被投票出局时可翻牌存活，但失去投票权</p>
+          <p><strong style="color:#795548;">👴 长老</strong> — 有两条命（狼人需杀两次），但被女巫毒杀直接死亡</p>
+          <p><strong style="color:#e91e63;">💘 丘比特</strong> — 首夜连接两名玩家为情侣，情侣同生共死</p>
+
           <hr style="border-color:var(--border);margin:12px 0;">
-          <p><strong>游戏流程：</strong></p>
+          <p><strong style="color:var(--gold);">⭐ 警长系统</strong></p>
+          <p>首日白天可竞选警长，警长投票算1.5票</p>
+          <p>警长死亡时可移交警徽或撕毁警徽</p>
+
+          <hr style="border-color:var(--border);margin:12px 0;">
+          <p><strong style="color:var(--gold);">💬 遗言机制</strong></p>
+          <p>被投票出局的玩家可发表30秒遗言</p>
+
+          <hr style="border-color:var(--border);margin:12px 0;">
+          <p><strong style="color:var(--gold);">🎮 游戏流程</strong></p>
           <p>夜晚 → 狼人猎杀 → 预言家查验 → 女巫用药 → 守卫守护 → 天亮 → 讨论投票 → 夜晚...</p>
+
           <hr style="border-color:var(--border);margin:12px 0;">
-          <p><strong>胜利条件：</strong></p>
+          <p><strong style="color:var(--gold);">🏆 胜利条件</strong></p>
           <p style="color:var(--green);">好人阵营：消灭所有狼人</p>
           <p style="color:var(--red);">狼人阵营：存活狼人数 ≥ 存活好人数</p>
+
+          <hr style="border-color:var(--border);margin:12px 0;">
+          <p><strong style="color:var(--gold);">✨ 特色功能</strong></p>
+          <p>🎭 表情互动 — 12种表情包 + 10种快捷发言</p>
+          <p>👁️ 观战模式 — 最多5人同时观战</p>
+          <p>📹 游戏回放 — 完整对局记录可回放</p>
+          <p>📊 战绩统计 — 胜率、连胜等数据记录</p>
+          <p>📨 邀请链接 — 一键分享房间给好友</p>
+          <p>🔊 音效系统 — 12种场景音效增强沉浸感</p>
+          <p>📜 旁白系统 — 游戏旁白播报，支持TTS语音</p>
         </div>
         <button class="btn btn-primary mt-20" onclick="this.closest('.overlay').remove()" style="width:100%;">知道了</button>
       </div>
